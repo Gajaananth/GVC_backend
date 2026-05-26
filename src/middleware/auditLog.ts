@@ -32,7 +32,7 @@ export const auditLog = (options: AuditOptions) => {
           description,
           ip_address: req.ip,
           user_agent: req.get('user-agent')
-        }).then(() => {}).catch(() => {});
+        }).then(({ error }) => { if (error) console.error('Audit log error:', error); });
       }
       return originalJson(body);
     };
