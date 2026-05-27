@@ -17,6 +17,11 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
   const eDate = (end_date as string) || format(endOfMonth(today), 'yyyy-MM-dd');
 
   try {
+    if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise'].includes(type)) {
+      res.status(403).json({ error: 'Staff are only permitted to view daily collections and customer-wise reports' });
+      return;
+    }
+
     let reportData: unknown;
 
     switch (type) {

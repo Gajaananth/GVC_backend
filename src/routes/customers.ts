@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/supabase';
-import { authenticateJWT, requireWrite, AuthRequest } from '../middleware/auth';
+import { authenticateJWT, requireWrite, requireAdmin, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -112,8 +112,8 @@ router.post('/', requireWrite, async (req: AuthRequest, res: Response): Promise<
   }
 });
 
-// PUT /api/customers/:id
-router.put('/:id', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
+// PUT /api/customers/:id (admin+ only — staff cannot edit customers)
+router.put('/:id', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = customerSchema.partial().parse(req.body);
 
@@ -140,8 +140,8 @@ router.put('/:id', requireWrite, async (req: AuthRequest, res: Response): Promis
   }
 });
 
-// DELETE /api/customers/:id - soft delete
-router.delete('/:id', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
+// DELETE /api/customers/:id - soft delete (admin+ only — staff cannot deactivate customers)
+router.delete('/:id', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   // Check if customer has active loans
   const { data: activeLoans } = await supabase
     .from('loans')

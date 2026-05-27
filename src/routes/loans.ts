@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/supabase';
-import { authenticateJWT, requireWrite, AuthRequest } from '../middleware/auth';
+import { authenticateJWT, requireWrite, requireAdmin, AuthRequest } from '../middleware/auth';
 import { calculateLoan } from '../utils/calculations';
 import { addMonths, format } from 'date-fns';
 
@@ -74,8 +74,8 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   res.json({ data: { ...loan, schedule: schedule || [], payments: payments || [] } });
 });
 
-// POST /api/loans
-router.post('/', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
+// POST /api/loans (admin+ only — staff cannot issue loans)
+router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = createLoanSchema.parse(req.body);
 
@@ -173,8 +173,8 @@ router.post('/', requireWrite, async (req: AuthRequest, res: Response): Promise<
   }
 });
 
-// PUT /api/loans/:id/status - update loan status
-router.put('/:id/status', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
+// PUT /api/loans/:id/status - update loan status (admin+ only)
+router.put('/:id/status', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   const { status, notes } = req.body;
   const validStatuses = ['active', 'closed', 'overdue', 'restructured'];
 

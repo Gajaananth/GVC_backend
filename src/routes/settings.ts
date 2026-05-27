@@ -6,8 +6,8 @@ import { z } from 'zod';
 const router = Router();
 router.use(authenticateJWT);
 
-// GET /api/settings
-router.get('/', async (_req: AuthRequest, res: Response): Promise<void> => {
+// GET /api/settings (owner only)
+router.get('/', requireOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
   const { data, error } = await supabase
     .from('company_settings')
     .select('*')
