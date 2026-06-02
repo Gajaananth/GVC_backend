@@ -66,7 +66,9 @@ export const requireRole = (...roles: string[]) => {
 
 // Middleware: owner or admin only
 export const requireAdmin = requireRole('owner', 'admin');
-// Middleware: any authenticated user except view_only can write
+// Admin + owner for customer create & document uploads (staff cannot)
+export const requireCustomerAdmin = requireRole('owner', 'admin');
+// Middleware: any authenticated user except view_only can write (payments, etc.)
 export const requireWrite = requireRole('owner', 'admin', 'staff');
 // Middleware: owner only
 export const requireOwner = requireRole('owner');

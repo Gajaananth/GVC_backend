@@ -4,6 +4,7 @@
  */
 export declare const generateEntityId: (prefix: string, sequence: number) => string;
 /**
+ * @deprecated Use calculateLoanProduct from loanCalculator.ts for new loans
  * Calculate flat-rate loan interest and installment schedule
  */
 export interface LoanCalcParams {

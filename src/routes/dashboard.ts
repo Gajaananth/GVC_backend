@@ -6,14 +6,56 @@ const router = Router();
 router.use(authenticateJWT);
 
 // GET /api/dashboard/summary
-router.get('/summary', async (_req: AuthRequest, res: Response): Promise<void> => {
+router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> => {
   const { data, error } = await supabase
     .from('v_dashboard_summary')
     .select('*')
     .single();
 
   if (error) { res.status(500).json({ error: error.message }); return; }
-  res.json({ data });
+
+  const { count: pendingLoans } = await supabase
+    .from('loans')
+    .select('*', { count: 'exact', head: true })
+    .eq('approval_status', 'pending_approval');
+
+  const { count: pendingAssignments } = await supabase
+    .from('loan_assignment_changes')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'pending_owner');
+
+  const { count: pendingCollections } = await supabase
+    .from('loan_payments')
+    .select('*', { count: 'exact', head: true })
+    .eq('approval_status', 'pending_admin');
+
+  const { count: pendingSavings } = await supabase
+    .from('savings_transactions')
+    .select('*', { count: 'exact', head: true })
+    .eq('approval_status', 'pending_admin');
+
+  const { count: pendingCorrections } = await supabase
+    .from('collection_correction_requests')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'pending_owner');
+
+  const { count: pendingPhysicalForms } = await supabase
+    .from('physical_form_submissions')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'pending_admin');
+
+  res.json({
+    data: {
+      ...data,
+      pending_loan_approvals: pendingLoans || 0,
+      pending_assignment_approvals: pendingAssignments || 0,
+      pending_collection_approvals: (pendingCollections || 0) + (pendingSavings || 0),
+      pending_correction_requests: pendingCorrections || 0,
+      pending_physical_forms: pendingPhysicalForms || 0,
+      show_owner_approvals: req.user?.role === 'owner',
+      show_admin_collections: req.user?.role === 'admin' || req.user?.role === 'owner'
+    }
+  });
 });
 
 // GET /api/dashboard/recent-transactions
@@ -96,6 +138,56 @@ router.get('/loan-status-chart', async (_req: AuthRequest, res: Response): Promi
 
   const chart = Object.entries(counts).map(([status, count]) => ({ status, count }));
   res.json({ data: chart });
+});
+
+// GET /api/dashboard/advanced-metrics
+router.get('/advanced-metrics', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    // 1. Portfolio At Risk (PAR)
+    // PAR > 30 days is standard. Here we'll just sum remaining_balance of overdue loans vs total active balance.
+    const { data: loans } = await supabase.from('loans').select('status, remaining_balance').neq('status', 'closed');
+    const totalOutstanding = (loans || []).reduce((sum, l) => sum + Number(l.remaining_balance), 0);
+    const overdueOutstanding = (loans || []).filter(l => l.status === 'overdue').reduce((sum, l) => sum + Number(l.remaining_balance), 0);
+    const parRatio = totalOutstanding > 0 ? (overdueOutstanding / totalOutstanding) * 100 : 0;
+
+    // 2. Top 5 Overdue Loans
+    const { data: topOverdue } = await supabase
+      .from('v_overdue_loans')
+      .select('*')
+      .order('remaining_balance', { ascending: false })
+      .limit(5);
+
+    // 3. Staff Performance (Collections this month by staff)
+    const startOfMonthStr = `${new Date().toISOString().slice(0, 7)}-01`;
+    const { data: staffPayments } = await supabase
+      .from('loan_payments')
+      .select('amount, submitter:created_by(id, full_name)')
+      .gte('payment_date', startOfMonthStr)
+      .eq('approval_status', 'approved');
+
+    const staffMap: Record<string, { name: string, total: number }> = {};
+    (staffPayments || []).forEach(p => {
+      const staffId = p.submitter?.id;
+      if (staffId) {
+        if (!staffMap[staffId]) staffMap[staffId] = { name: p.submitter.full_name, total: 0 };
+        staffMap[staffId].total += Number(p.amount);
+      }
+    });
+    
+    const staffPerformance = Object.values(staffMap).sort((a, b) => b.total - a.total).slice(0, 5);
+
+    res.json({
+      data: {
+        portfolio_at_risk_pct: parRatio,
+        total_outstanding: totalOutstanding,
+        overdue_outstanding: overdueOutstanding,
+        top_overdue: topOverdue || [],
+        staff_performance: staffPerformance
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch advanced metrics' });
+  }
 });
 
 export default router;

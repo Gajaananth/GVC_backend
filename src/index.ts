@@ -19,6 +19,12 @@ import dueRoutes from './routes/due';
 import reportRoutes from './routes/reports';
 import logRoutes from './routes/logs';
 import settingsRoutes from './routes/settings';
+import uploadRoutes from './routes/uploads';
+import approvalRoutes from './routes/approvals';
+import collectionRoutes from './routes/collections';
+import formRoutes from './routes/forms';
+import documentRoutes from './routes/documents';
+import cronRoutes from './routes/cron';
 
 dotenv.config();
 
@@ -81,6 +87,13 @@ app.use('/api/due', dueRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/uploads', uploadRoutes);
+app.use('/api/approvals', approvalRoutes);
+app.use('/api/collections', collectionRoutes);
+app.use('/api/forms', formRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/cron', cronRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // 404 handler
 app.use((_req, res) => {

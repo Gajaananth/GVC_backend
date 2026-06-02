@@ -6,7 +6,7 @@ const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 // GET /api/dashboard/summary
-router.get('/summary', async (_req, res) => {
+router.get('/summary', async (req, res) => {
     const { data, error } = await supabase_1.supabase
         .from('v_dashboard_summary')
         .select('*')
@@ -15,7 +15,42 @@ router.get('/summary', async (_req, res) => {
         res.status(500).json({ error: error.message });
         return;
     }
-    res.json({ data });
+    const { count: pendingLoans } = await supabase_1.supabase
+        .from('loans')
+        .select('*', { count: 'exact', head: true })
+        .eq('approval_status', 'pending_approval');
+    const { count: pendingAssignments } = await supabase_1.supabase
+        .from('loan_assignment_changes')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending_owner');
+    const { count: pendingCollections } = await supabase_1.supabase
+        .from('loan_payments')
+        .select('*', { count: 'exact', head: true })
+        .eq('approval_status', 'pending_admin');
+    const { count: pendingSavings } = await supabase_1.supabase
+        .from('savings_transactions')
+        .select('*', { count: 'exact', head: true })
+        .eq('approval_status', 'pending_admin');
+    const { count: pendingCorrections } = await supabase_1.supabase
+        .from('collection_correction_requests')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending_owner');
+    const { count: pendingPhysicalForms } = await supabase_1.supabase
+        .from('physical_form_submissions')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending_admin');
+    res.json({
+        data: {
+            ...data,
+            pending_loan_approvals: pendingLoans || 0,
+            pending_assignment_approvals: pendingAssignments || 0,
+            pending_collection_approvals: (pendingCollections || 0) + (pendingSavings || 0),
+            pending_correction_requests: pendingCorrections || 0,
+            pending_physical_forms: pendingPhysicalForms || 0,
+            show_owner_approvals: req.user?.role === 'owner',
+            show_admin_collections: req.user?.role === 'admin' || req.user?.role === 'owner'
+        }
+    });
 });
 // GET /api/dashboard/recent-transactions
 router.get('/recent-transactions', async (_req, res) => {

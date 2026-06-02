@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requireOwner = exports.requireWrite = exports.requireAdmin = exports.requireRole = exports.authenticateJWT = void 0;
+exports.requireOwner = exports.requireWrite = exports.requireCustomerAdmin = exports.requireAdmin = exports.requireRole = exports.authenticateJWT = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const supabase_1 = require("../config/supabase");
 const authenticateJWT = async (req, res, next) => {
@@ -49,7 +49,9 @@ const requireRole = (...roles) => {
 exports.requireRole = requireRole;
 // Middleware: owner or admin only
 exports.requireAdmin = (0, exports.requireRole)('owner', 'admin');
-// Middleware: any authenticated user except view_only can write
+// Admin + owner for customer create & document uploads (staff cannot)
+exports.requireCustomerAdmin = (0, exports.requireRole)('owner', 'admin');
+// Middleware: any authenticated user except view_only can write (payments, etc.)
 exports.requireWrite = (0, exports.requireRole)('owner', 'admin', 'staff');
 // Middleware: owner only
 exports.requireOwner = (0, exports.requireRole)('owner');

@@ -5,20 +5,23 @@ const zod_1 = require("zod");
 const date_fns_1 = require("date-fns");
 const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
+const applyPayment_1 = require("../utils/applyPayment");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 const recordPaymentSchema = zod_1.z.object({
     loan_id: zod_1.z.string().uuid(),
     payment_date: zod_1.z.string().optional(),
     amount: zod_1.z.number().positive(),
+    cash_amount: zod_1.z.number().min(0).optional(),
+    online_amount: zod_1.z.number().min(0).optional(),
     payment_type: zod_1.z.enum(['regular', 'partial', 'full_settlement', 'advance']),
     payment_method: zod_1.z.enum(['cash', 'bank_transfer', 'cheque', 'mobile']).default('cash'),
     reference_number: zod_1.z.string().optional().nullable(),
     notes: zod_1.z.string().optional().nullable()
 });
-// GET /api/payments - list payments
+// GET /api/payments
 router.get('/', async (req, res) => {
-    const { loan_id, customer_id, start_date, end_date, page = '1', limit = '20' } = req.query;
+    const { loan_id, customer_id, start_date, end_date, approval_status, page = '1', limit = '20' } = req.query;
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
     const offset = (pageNum - 1) * limitNum;
@@ -35,6 +38,8 @@ router.get('/', async (req, res) => {
         query = query.gte('payment_date', start_date);
     if (end_date)
         query = query.lte('payment_date', end_date);
+    if (approval_status)
+        query = query.eq('approval_status', approval_status);
     const { data, error, count } = await query;
     if (error) {
         res.status(500).json({ error: error.message });
@@ -42,19 +47,24 @@ router.get('/', async (req, res) => {
     }
     res.json({ data, total: count, page: pageNum, limit: limitNum, totalPages: Math.ceil((count || 0) / limitNum) });
 });
-// POST /api/payments - record a payment
-router.post('/', auth_1.requireWrite, async (req, res) => {
+// POST /api/payments — admin/owner only, immediate approval (staff use /api/collections/submit/payment)
+router.post('/', auth_1.requireAdmin, async (req, res) => {
     try {
         const body = recordPaymentSchema.parse(req.body);
         const paymentDate = body.payment_date || (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
-        // Get loan details
-        const { data: loan, error: loanError } = await supabase_1.supabase
+        const cashAmount = body.cash_amount ?? (body.payment_method === 'cash' ? body.amount : 0);
+        const onlineAmount = body.online_amount ?? (body.payment_method !== 'cash' ? body.amount : 0);
+        const { data: loan } = await supabase_1.supabase
             .from('loans')
             .select('*, customers(id, full_name)')
             .eq('id', body.loan_id)
             .single();
-        if (loanError || !loan) {
+        if (!loan) {
             res.status(404).json({ error: 'Loan not found' });
+            return;
+        }
+        if (loan.approval_status !== 'approved' || loan.status === 'pending_approval') {
+            res.status(400).json({ error: 'Payments only on owner-approved loans' });
             return;
         }
         if (loan.is_fully_paid) {
@@ -62,40 +72,9 @@ router.post('/', auth_1.requireWrite, async (req, res) => {
             return;
         }
         if (body.amount > loan.remaining_balance + 1) {
-            res.status(400).json({ error: `Payment amount ₨${body.amount} exceeds remaining balance ₨${loan.remaining_balance}` });
+            res.status(400).json({ error: `Amount exceeds remaining balance` });
             return;
         }
-        // Calculate principal/interest split (flat rate: interest first, then principal)
-        const interestPerInstallment = loan.total_interest / loan.duration_months;
-        const interestPaid = Math.min(interestPerInstallment, body.amount);
-        const principalPaid = Math.max(0, body.amount - interestPaid);
-        const newBalance = Math.max(0, loan.remaining_balance - body.amount);
-        const newAmountPaid = loan.amount_paid + body.amount;
-        const isFullyPaid = newBalance <= 0.01 || body.payment_type === 'full_settlement';
-        // Find next overdue or pending installment to mark
-        const { data: pendingInstallments } = await supabase_1.supabase
-            .from('loan_schedule')
-            .select('*')
-            .eq('loan_id', body.loan_id)
-            .in('status', ['pending', 'partial', 'overdue'])
-            .order('installment_number', { ascending: true })
-            .limit(1);
-        const currentInstallment = pendingInstallments?.[0];
-        // Determine next due date
-        let nextDueDate = null;
-        if (!isFullyPaid && currentInstallment) {
-            const { data: nextInstallment } = await supabase_1.supabase
-                .from('loan_schedule')
-                .select('due_date')
-                .eq('loan_id', body.loan_id)
-                .in('status', ['pending', 'partial'])
-                .gt('installment_number', currentInstallment.installment_number)
-                .order('installment_number', { ascending: true })
-                .limit(1)
-                .single();
-            nextDueDate = nextInstallment?.due_date || null;
-        }
-        // Insert payment record
         const { data: payment, error: payError } = await supabase_1.supabase
             .from('loan_payments')
             .insert({
@@ -103,12 +82,15 @@ router.post('/', auth_1.requireWrite, async (req, res) => {
             customer_id: loan.customer_id,
             payment_date: paymentDate,
             amount: body.amount,
-            principal_paid: principalPaid,
-            interest_paid: interestPaid,
+            cash_amount: cashAmount,
+            online_amount: onlineAmount,
             payment_type: body.payment_type,
             payment_method: body.payment_method,
             reference_number: body.reference_number,
             notes: body.notes,
+            approval_status: 'approved',
+            approved_by: req.user.id,
+            approved_at: new Date().toISOString(),
             created_by: req.user.id
         })
             .select()
@@ -117,35 +99,21 @@ router.post('/', auth_1.requireWrite, async (req, res) => {
             res.status(500).json({ error: payError?.message });
             return;
         }
-        // Update loan balance and status
-        await supabase_1.supabase.from('loans').update({
-            amount_paid: newAmountPaid,
-            remaining_balance: newBalance,
-            last_payment_date: paymentDate,
-            next_due_date: nextDueDate,
-            is_fully_paid: isFullyPaid,
-            status: isFullyPaid ? 'closed' : loan.status === 'overdue' ? 'active' : loan.status,
-            updated_by: req.user.id
-        }).eq('id', body.loan_id);
-        // Update installment status
-        if (currentInstallment) {
-            const newPaid = (currentInstallment.paid_amount || 0) + body.amount;
-            const installmentStatus = newPaid >= currentInstallment.installment_amount ? 'paid' : 'partial';
-            await supabase_1.supabase.from('loan_schedule').update({
-                paid_amount: Math.min(newPaid, currentInstallment.installment_amount),
-                status: installmentStatus,
-                paid_date: paymentDate
-            }).eq('id', currentInstallment.id);
+        const result = await (0, applyPayment_1.applyLoanPayment)(payment.id, req.user.id);
+        if (!result.success) {
+            res.status(400).json({ error: result.error });
+            return;
         }
+        const { data: updatedLoan } = await supabase_1.supabase.from('loans').select('remaining_balance, is_fully_paid').eq('id', body.loan_id).single();
         await supabase_1.supabase.from('activity_logs').insert({
             user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
             action: 'CREATE', entity_type: 'payment',
             entity_id: payment.id, entity_code: payment.payment_code,
-            description: `Recorded payment ${payment.payment_code} of ₨${body.amount.toLocaleString()} for loan ${loan.loan_code}`
+            description: `Admin recorded payment ${payment.payment_code}`
         });
         res.status(201).json({
-            data: { ...payment, loan_code: loan.loan_code, new_balance: newBalance, is_fully_paid: isFullyPaid },
-            message: isFullyPaid ? 'Loan fully settled!' : 'Payment recorded successfully'
+            data: { ...payment, loan_code: loan.loan_code, new_balance: updatedLoan?.remaining_balance, is_fully_paid: updatedLoan?.is_fully_paid },
+            message: updatedLoan?.is_fully_paid ? 'Loan fully settled!' : 'Payment recorded'
         });
     }
     catch (err) {
@@ -156,7 +124,6 @@ router.post('/', auth_1.requireWrite, async (req, res) => {
         res.status(500).json({ error: 'Failed to record payment' });
     }
 });
-// GET /api/payments/:id - single payment (for receipt)
 router.get('/:id', async (req, res) => {
     const { data, error } = await supabase_1.supabase
         .from('loan_payments')

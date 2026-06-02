@@ -2,7 +2,8 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { format } from 'date-fns';
 import { supabase } from '../config/supabase';
-import { authenticateJWT, requireWrite, AuthRequest } from '../middleware/auth';
+import { authenticateJWT, requireAdmin, requireWrite, AuthRequest } from '../middleware/auth';
+import { applySavingsTransaction } from '../utils/applySavings';
 import { calculateSavingsInterest } from '../utils/calculations';
 
 const router = Router();
@@ -67,8 +68,8 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   res.json({ data: { ...account, transactions: transactions || [] } });
 });
 
-// POST /api/savings - create account
-router.post('/', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
+// POST /api/savings - create account (admin+ only; staff submit deposits via collections)
+router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = createSavingsSchema.parse(req.body);
 
@@ -105,8 +106,8 @@ router.post('/', requireWrite, async (req: AuthRequest, res: Response): Promise<
   }
 });
 
-// POST /api/savings/:id/transactions - deposit or withdraw
-router.post('/:id/transactions', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
+// POST /api/savings/:id/transactions — admin/owner immediate (staff use collections)
+router.post('/:id/transactions', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = transactionSchema.parse(req.body);
     const txDate = body.transaction_date || format(new Date(), 'yyyy-MM-dd');
@@ -120,17 +121,6 @@ router.post('/:id/transactions', requireWrite, async (req: AuthRequest, res: Res
     if (accErr || !account) { res.status(404).json({ error: 'Savings account not found' }); return; }
     if (!account.is_active) { res.status(400).json({ error: 'Savings account is inactive' }); return; }
 
-    let newBalance = account.balance;
-    if (body.transaction_type === 'deposit' || body.transaction_type === 'interest') {
-      newBalance += body.amount;
-    } else if (body.transaction_type === 'withdrawal') {
-      if (body.amount > account.balance - account.minimum_balance) {
-        res.status(400).json({ error: `Insufficient balance. Available: ₨${(account.balance - account.minimum_balance).toLocaleString()}` });
-        return;
-      }
-      newBalance -= body.amount;
-    }
-
     const { data: tx, error: txErr } = await supabase
       .from('savings_transactions')
       .insert({
@@ -138,11 +128,16 @@ router.post('/:id/transactions', requireWrite, async (req: AuthRequest, res: Res
         customer_id: account.customer_id,
         transaction_type: body.transaction_type,
         amount: body.amount,
-        balance_after: newBalance,
+        cash_amount: body.payment_method === 'cash' ? body.amount : 0,
+        online_amount: body.payment_method !== 'cash' ? body.amount : 0,
+        balance_after: account.balance,
         transaction_date: txDate,
         payment_method: body.payment_method,
         reference_number: body.reference_number,
         description: body.description,
+        approval_status: 'approved',
+        approved_by: req.user!.id,
+        approved_at: new Date().toISOString(),
         created_by: req.user!.id
       })
       .select()
@@ -150,22 +145,22 @@ router.post('/:id/transactions', requireWrite, async (req: AuthRequest, res: Res
 
     if (txErr || !tx) { res.status(500).json({ error: txErr?.message }); return; }
 
-    // Update account balance and totals
-    const updateData: Record<string, unknown> = { balance: newBalance };
-    if (body.transaction_type === 'deposit') updateData.total_deposited = (account.total_deposited || 0) + body.amount;
-    if (body.transaction_type === 'withdrawal') updateData.total_withdrawn = (account.total_withdrawn || 0) + body.amount;
-    if (body.transaction_type === 'interest') updateData.total_interest_earned = (account.total_interest_earned || 0) + body.amount;
+    const result = await applySavingsTransaction(tx.id);
+    if (!result.success) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
 
-    await supabase.from('savings_accounts').update(updateData).eq('id', req.params.id);
+    const { data: updated } = await supabase.from('savings_accounts').select('balance').eq('id', req.params.id).single();
 
     await supabase.from('activity_logs').insert({
       user_id: req.user!.id, user_name: req.user!.full_name, user_role: req.user!.role,
       action: 'CREATE', entity_type: 'savings_transaction',
       entity_id: tx.id, entity_code: tx.transaction_code,
-      description: `${body.transaction_type === 'deposit' ? 'Deposited' : 'Withdrew'} ₨${body.amount.toLocaleString()} to/from ${account.account_code}`
+      description: `Admin ${body.transaction_type} on ${account.account_code}`
     });
 
-    res.status(201).json({ data: { ...tx, new_balance: newBalance }, message: `${body.transaction_type} successful` });
+    res.status(201).json({ data: { ...tx, new_balance: updated?.balance }, message: `${body.transaction_type} successful` });
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
     res.status(500).json({ error: 'Failed to process transaction' });

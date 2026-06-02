@@ -6,8 +6,8 @@ const auth_1 = require("../middleware/auth");
 const zod_1 = require("zod");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
-// GET /api/settings
-router.get('/', async (_req, res) => {
+// GET /api/settings (owner only)
+router.get('/', auth_1.requireOwner, async (_req, res) => {
     const { data, error } = await supabase_1.supabase
         .from('company_settings')
         .select('*')

@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { supabase } from '../config/supabase';
 import { createError } from '../middleware/errorHandler';
+import { sendEmail } from '../utils/email';
 
 const router = Router();
 
@@ -168,8 +169,22 @@ router.post('/request-reset', async (req: Request, res: Response): Promise<void>
       .update({ reset_token: resetToken, reset_token_expires_at: expiresAt })
       .eq('id', user.id);
 
-    // TODO: Send email with reset link
-    // await sendPasswordResetEmail(user.email, user.full_name, resetToken);
+    // Send email with reset link
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
+    await sendEmail(
+      user.email,
+      'Password Reset - GVC Agro Finance',
+      `<div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2 style="color: #166534;">Password Reset Request</h2>
+        <p>Hi ${user.full_name},</p>
+        <p>We received a request to reset your password. Click the button below to set a new password:</p>
+        <a href="${resetLink}" style="display: inline-block; background: #166534; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 16px 0;">Reset Password</a>
+        <p style="color: #666; font-size: 13px;">This link expires in 1 hour. If you didn't request this, ignore this email.</p>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+        <p style="color: #999; font-size: 12px;">GVC Agro Finance</p>
+      </div>`
+    );
 
     res.json({ message: 'If that email exists, a reset link has been sent.' });
   } catch {
