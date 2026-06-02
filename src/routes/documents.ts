@@ -247,5 +247,11 @@ router.get('/loan-certificate/:loan_id', async (req: AuthRequest, res: Response)
     doc.font('Helvetica').text('........................................', 500, sigY);
     doc.text('Authorized Signature', 500, sigY + 15);
     doc.text('GVC Agro Finance', 500, sigY + 30);
+    
+    doc.end();
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to generate certificate' });
+  }
+});
 
 export default router;

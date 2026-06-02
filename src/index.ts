@@ -23,7 +23,10 @@ import uploadRoutes from './routes/uploads';
 import approvalRoutes from './routes/approvals';
 import collectionRoutes from './routes/collections';
 import formRoutes from './routes/forms';
-import documentRoutes from './routes/documents';
+import documentsRoutes from './routes/documents';
+import notificationsRoutes from './routes/notifications';
+import importExportRoutes from './routes/import-export';
+import searchRoutes from './routes/search';
 import cronRoutes from './routes/cron';
 
 dotenv.config();
@@ -91,9 +94,11 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/collections', collectionRoutes);
 app.use('/api/forms', formRoutes);
-app.use('/api/documents', documentRoutes);
 app.use('/api/cron', cronRoutes);
-app.use('/api/notifications', notificationRoutes);
+app.use('/api/documents', documentsRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/import-export', importExportRoutes);
+app.use('/api/search', searchRoutes);
 
 // 404 handler
 app.use((_req, res) => {

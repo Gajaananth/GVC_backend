@@ -167,9 +167,10 @@ router.get('/advanced-metrics', async (req: AuthRequest, res: Response): Promise
 
     const staffMap: Record<string, { name: string, total: number }> = {};
     (staffPayments || []).forEach(p => {
-      const staffId = p.submitter?.id;
+      const submitter: any = Array.isArray(p.submitter) ? p.submitter[0] : p.submitter;
+      const staffId = submitter?.id;
       if (staffId) {
-        if (!staffMap[staffId]) staffMap[staffId] = { name: p.submitter.full_name, total: 0 };
+        if (!staffMap[staffId]) staffMap[staffId] = { name: submitter?.full_name || 'Unknown', total: 0 };
         staffMap[staffId].total += Number(p.amount);
       }
     });

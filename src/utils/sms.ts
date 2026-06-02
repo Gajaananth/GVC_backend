@@ -45,7 +45,7 @@ export const sendSMS = async (to: string, message: string): Promise<boolean> => 
       method: 'GET'
     });
 
-    const result = await response.json();
+    const result: any = await response.json();
 
     if (result.status === 'success') {
       logger.info(`SMS sent successfully to ${formattedTo}`);

@@ -195,7 +195,7 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
           { header: 'Method', key: 'payment_method', width: 15 },
           { header: 'Amount (LKR)', key: 'amount', width: 15 },
         ];
-        (data || []).forEach(p => worksheet.addRow({ ...p, customer: p.customers?.full_name }));
+        (data || []).forEach(p => worksheet.addRow({ ...p, customer: (p as any).customers?.full_name }));
       } else if (type === 'loan_summary') {
         const { data } = await supabase.from('loans').select(`loan_code, status, principal_amount, remaining_balance, customers(full_name)`);
         worksheet.columns = [
@@ -205,7 +205,7 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
           { header: 'Principal', key: 'principal_amount', width: 15 },
           { header: 'Remaining Balance', key: 'remaining_balance', width: 15 },
         ];
-        (data || []).forEach(l => worksheet.addRow({ ...l, customer: l.customers?.full_name }));
+        (data || []).forEach(l => worksheet.addRow({ ...l, 'Customer': (l as any).customers?.full_name || 'N/A' }));
       } else if (type === 'savings_summary') {
         const { data } = await supabase.from('savings_accounts').select(`account_code, is_active, balance, total_deposited, customers(full_name)`);
         worksheet.columns = [
@@ -215,7 +215,7 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
           { header: 'Balance', key: 'balance', width: 15 },
           { header: 'Total Deposited', key: 'total_deposited', width: 15 },
         ];
-        (data || []).forEach(a => worksheet.addRow({ ...a, customer: a.customers?.full_name }));
+        (data || []).forEach(a => worksheet.addRow({ ...a, 'Customer': (a as any).customers?.full_name || 'N/A' }));
       } else if (type === 'due_payment') {
         const { data } = await supabase.from('v_overdue_loans').select('*');
         worksheet.columns = [
