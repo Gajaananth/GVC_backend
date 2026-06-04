@@ -6,6 +6,8 @@ export interface AuthRequest extends Request {
         role: string;
         full_name: string;
         user_code: string;
+        branch_id: string;
+        branch_name?: string;
     };
 }
 export declare const authenticateJWT: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void>;

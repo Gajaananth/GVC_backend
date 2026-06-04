@@ -36,12 +36,20 @@ router.get('/', async (req, res) => {
         .select(`*, customers(id, customer_code, full_name, phone)`, { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(offset, offset + limitNum - 1);
-    if (customer_id)
-        query = query.eq('customer_id', customer_id);
+    // Apply branch filter for non-owner roles
+    if (req.user?.role !== 'owner') {
+        query = query.eq('branch_id', req.user?.branch_id);
+    }
+    // Staff can only view accounts they are in charge of (based on assigned_staff_id of customer)
+    if (req.user?.role === 'staff') {
+        query = query.eq('customers.assigned_staff_id', req.user.id);
+    }
     if (account_type)
         query = query.eq('account_type', account_type);
-    if (search)
-        query = query.or(`account_code.ilike.%${search}%`);
+    if (search) {
+        const safeSearch = search.replace(/"/g, '');
+        query = query.or(`account_code.ilike."%${safeSearch}%"`);
+    }
     const { data, error, count } = await query;
     if (error) {
         res.status(500).json({ error: error.message });
@@ -93,6 +101,7 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
             action: 'CREATE', entity_type: 'savings',
             entity_id: data.id, entity_code: data.account_code,
+            branch_id: req.user.branch_id,
             description: `Created savings account ${data.account_code} for ${customer.full_name}`
         });
         res.status(201).json({ data, message: 'Savings account created successfully' });
@@ -140,7 +149,7 @@ router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
             approval_status: 'approved',
             approved_by: req.user.id,
             approved_at: new Date().toISOString(),
-            created_by: req.user.id
+            branch_id: req.user.branch_id,
         })
             .select()
             .single();
@@ -158,6 +167,7 @@ router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
             user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
             action: 'CREATE', entity_type: 'savings_transaction',
             entity_id: tx.id, entity_code: tx.transaction_code,
+            branch_id: req.user.branch_id,
             description: `Admin ${body.transaction_type} on ${account.account_code}`
         });
         res.status(201).json({ data: { ...tx, new_balance: updated?.balance }, message: `${body.transaction_type} successful` });

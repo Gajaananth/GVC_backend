@@ -6,6 +6,7 @@ const date_fns_1 = require("date-fns");
 const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
 const applyPayment_1 = require("../utils/applyPayment");
+const sms_1 = require("../utils/sms");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 const recordPaymentSchema = zod_1.z.object({
@@ -56,7 +57,7 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
         const onlineAmount = body.online_amount ?? (body.payment_method !== 'cash' ? body.amount : 0);
         const { data: loan } = await supabase_1.supabase
             .from('loans')
-            .select('*, customers(id, full_name)')
+            .select('*, customers(id, full_name, phone)')
             .eq('id', body.loan_id)
             .single();
         if (!loan) {
@@ -111,6 +112,11 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             entity_id: payment.id, entity_code: payment.payment_code,
             description: `Admin recorded payment ${payment.payment_code}`
         });
+        // Send SMS Receipt
+        if (loan.customers && loan.customers.phone) {
+            const message = `Dear ${loan.customers.full_name}, your payment of LKR ${body.amount} for loan ${loan.loan_code} has been received. Thank you. GVC Agro Finance.`;
+            await (0, sms_1.sendSMS)(loan.customers.phone, message);
+        }
         res.status(201).json({
             data: { ...payment, loan_code: loan.loan_code, new_balance: updatedLoan?.remaining_balance, is_fully_paid: updatedLoan?.is_fully_paid },
             message: updatedLoan?.is_fully_paid ? 'Loan fully settled!' : 'Payment recorded'

@@ -14,13 +14,15 @@ const createUserSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string().min(8),
     full_name: zod_1.z.string().min(2),
-    role: zod_1.z.enum(['owner', 'admin', 'staff', 'view_only']),
+    role: zod_1.z.enum(['owner', 'branch_manager', 'admin', 'staff', 'view_only']),
     mobile: zod_1.z.string().optional(),
-    address: zod_1.z.string().optional()
+    address: zod_1.z.string().optional(),
+    branch_id: zod_1.z.string().uuid().optional() // Owner may omit
 });
 const updateUserSchema = createUserSchema.partial().omit({ password: true }).extend({
     password: zod_1.z.string().min(8).optional(),
-    is_active: zod_1.z.boolean().optional()
+    is_active: zod_1.z.boolean().optional(),
+    branch_id: zod_1.z.string().uuid().optional()
 });
 // GET /api/users - list all users (admin+)
 router.get('/', auth_1.requireAdmin, async (_req, res) => {

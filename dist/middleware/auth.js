@@ -18,14 +18,22 @@ const authenticateJWT = async (req, res, next) => {
         // Verify user still exists and is active
         const { data: user, error } = await supabase_1.supabase
             .from('users')
-            .select('id, email, role, full_name, user_code, is_active')
+            .select('id, email, role, full_name, user_code, is_active, branch_id, branches(branch_name)')
             .eq('id', decoded.id)
             .single();
         if (error || !user || !user.is_active) {
             res.status(401).json({ error: 'Invalid or expired token' });
             return;
         }
-        req.user = { id: user.id, email: user.email, role: user.role, full_name: user.full_name, user_code: user.user_code };
+        req.user = {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            full_name: user.full_name,
+            user_code: user.user_code,
+            branch_id: user.branch_id,
+            branch_name: user.branches?.branch_name
+        };
         next();
     }
     catch {
@@ -48,9 +56,9 @@ const requireRole = (...roles) => {
 };
 exports.requireRole = requireRole;
 // Middleware: owner or admin only
-exports.requireAdmin = (0, exports.requireRole)('owner', 'admin');
+exports.requireAdmin = (0, exports.requireRole)('owner', 'admin', 'branch_manager', 'cashier');
 // Admin + owner for customer create & document uploads (staff cannot)
-exports.requireCustomerAdmin = (0, exports.requireRole)('owner', 'admin');
+exports.requireCustomerAdmin = (0, exports.requireRole)('owner', 'admin', 'branch_manager', 'cashier');
 // Middleware: any authenticated user except view_only can write (payments, etc.)
 exports.requireWrite = (0, exports.requireRole)('owner', 'admin', 'staff');
 // Middleware: owner only

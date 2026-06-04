@@ -124,5 +124,52 @@ router.get('/loan-status-chart', async (_req, res) => {
     const chart = Object.entries(counts).map(([status, count]) => ({ status, count }));
     res.json({ data: chart });
 });
+// GET /api/dashboard/advanced-metrics
+router.get('/advanced-metrics', async (req, res) => {
+    try {
+        // 1. Portfolio At Risk (PAR)
+        // PAR > 30 days is standard. Here we'll just sum remaining_balance of overdue loans vs total active balance.
+        const { data: loans } = await supabase_1.supabase.from('loans').select('status, remaining_balance').neq('status', 'closed');
+        const totalOutstanding = (loans || []).reduce((sum, l) => sum + Number(l.remaining_balance), 0);
+        const overdueOutstanding = (loans || []).filter(l => l.status === 'overdue').reduce((sum, l) => sum + Number(l.remaining_balance), 0);
+        const parRatio = totalOutstanding > 0 ? (overdueOutstanding / totalOutstanding) * 100 : 0;
+        // 2. Top 5 Overdue Loans
+        const { data: topOverdue } = await supabase_1.supabase
+            .from('v_overdue_loans')
+            .select('*')
+            .order('remaining_balance', { ascending: false })
+            .limit(5);
+        // 3. Staff Performance (Collections this month by staff)
+        const startOfMonthStr = `${new Date().toISOString().slice(0, 7)}-01`;
+        const { data: staffPayments } = await supabase_1.supabase
+            .from('loan_payments')
+            .select('amount, submitter:created_by(id, full_name)')
+            .gte('payment_date', startOfMonthStr)
+            .eq('approval_status', 'approved');
+        const staffMap = {};
+        (staffPayments || []).forEach(p => {
+            const submitter = Array.isArray(p.submitter) ? p.submitter[0] : p.submitter;
+            const staffId = submitter?.id;
+            if (staffId) {
+                if (!staffMap[staffId])
+                    staffMap[staffId] = { name: submitter?.full_name || 'Unknown', total: 0 };
+                staffMap[staffId].total += Number(p.amount);
+            }
+        });
+        const staffPerformance = Object.values(staffMap).sort((a, b) => b.total - a.total).slice(0, 5);
+        res.json({
+            data: {
+                portfolio_at_risk_pct: parRatio,
+                total_outstanding: totalOutstanding,
+                overdue_outstanding: overdueOutstanding,
+                top_overdue: topOverdue || [],
+                staff_performance: staffPerformance
+            }
+        });
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to fetch advanced metrics' });
+    }
+});
 exports.default = router;
 //# sourceMappingURL=dashboard.js.map

@@ -27,6 +27,11 @@ const uploads_1 = __importDefault(require("./routes/uploads"));
 const approvals_1 = __importDefault(require("./routes/approvals"));
 const collections_1 = __importDefault(require("./routes/collections"));
 const forms_1 = __importDefault(require("./routes/forms"));
+const documents_1 = __importDefault(require("./routes/documents"));
+const notifications_1 = __importDefault(require("./routes/notifications"));
+const import_export_1 = __importDefault(require("./routes/import-export"));
+const search_1 = __importDefault(require("./routes/search"));
+const cron_1 = __importDefault(require("./routes/cron"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -82,6 +87,11 @@ app.use('/api/uploads', uploads_1.default);
 app.use('/api/approvals', approvals_1.default);
 app.use('/api/collections', collections_1.default);
 app.use('/api/forms', forms_1.default);
+app.use('/api/cron', cron_1.default);
+app.use('/api/documents', documents_1.default);
+app.use('/api/notifications', notifications_1.default);
+app.use('/api/import-export', import_export_1.default);
+app.use('/api/search', search_1.default);
 // 404 handler
 app.use((_req, res) => {
     res.status(404).json({ error: 'Route not found' });

@@ -6,6 +6,7 @@ const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
 const loanCalculator_1 = require("../utils/loanCalculator");
 const loanTermConfig_1 = require("../utils/loanTermConfig");
+const date_fns_1 = require("date-fns");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 const loanProductFields = {
@@ -36,6 +37,11 @@ const calculateSchema = zod_1.z.object({
     term_count: zod_1.z.number().int().positive(),
     repayment_frequency: zod_1.z.enum(['daily', 'weekly', 'biweekly', 'monthly']),
     credit_date: zod_1.z.string()
+});
+const restructureSchema = zod_1.z.object({
+    new_interest_rate_per_period: zod_1.z.number().min(0),
+    new_term_count: zod_1.z.number().int().positive(),
+    repayment_frequency: zod_1.z.enum(['daily', 'weekly', 'biweekly', 'monthly'])
 });
 // GET /api/loans/term-config — term limits & presets per collection type
 router.get('/term-config', auth_1.authenticateJWT, async (_req, res) => {
@@ -85,14 +91,24 @@ router.get('/', async (req, res) => {
     if (staff_id) {
         query = query.eq('in_charge_user_id', staff_id);
     }
-    if (search)
-        query = query.or(`loan_code.ilike.%${search}%`);
+    if (search) {
+        const safeSearch = search.replace(/"/g, '');
+        query = query.or(`loan_code.ilike."%${safeSearch}%"`);
+    }
     if (status)
         query = query.eq('status', status);
     if (approval_status)
         query = query.eq('approval_status', approval_status);
     if (customer_id)
         query = query.eq('customer_id', customer_id);
+    // Apply branch isolation for non-owner roles
+    if (req.user?.role !== 'owner') {
+        query = query.eq('branch_id', req.user?.branch_id);
+    }
+    // Staff can only view loans they are in charge of
+    if (req.user?.role === 'staff') {
+        query = query.eq('in_charge_user_id', req.user.id);
+    }
     const { data, error, count } = await query;
     if (error) {
         res.status(500).json({ error: error.message });
@@ -119,6 +135,11 @@ router.get('/:id', async (req, res) => {
         .single();
     if (error || !loan) {
         res.status(404).json({ error: 'Loan not found' });
+        return;
+    }
+    // Ensure loan belongs to user's branch (non-owner)
+    if (req.user?.role !== 'owner' && loan.branch_id !== req.user?.branch_id) {
+        res.status(403).json({ error: 'Access to loan denied for your branch' });
         return;
     }
     const { data: schedule } = await supabase_1.supabase
@@ -151,13 +172,15 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
         const body = createLoanSchema.parse(req.body);
         const { data: customer } = await supabase_1.supabase
             .from('customers')
-            .select('id, full_name, is_active, assigned_staff_id')
+            .select('id, full_name, is_active, assigned_staff_id, branch_id')
             .eq('id', body.customer_id)
             .single();
         if (!customer || !customer.is_active) {
             res.status(404).json({ error: 'Customer not found or inactive' });
             return;
         }
+        // Use customer's branch for loan
+        const loanBranchId = customer.branch_id;
         for (const staffId of [body.applied_by, body.in_charge_user_id]) {
             const { data: staff } = await supabase_1.supabase
                 .from('users')
@@ -186,6 +209,7 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             .from('loans')
             .insert({
             customer_id: body.customer_id,
+            branch_id: loanBranchId,
             principal_amount: calc.grossLoanAmount,
             gross_loan_amount: calc.grossLoanAmount,
             insurance_fee_percent: body.insurance_fee_percent,
@@ -229,6 +253,7 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
             action: 'CREATE', entity_type: 'loan',
             entity_id: loan.id, entity_code: loan.loan_code,
+            branch_id: req.user.branch_id,
             description: `Submitted ${body.repayment_frequency} loan ${loan.loan_code} — gross ₨${calc.grossLoanAmount.toLocaleString()}, net disbursement ₨${calc.netDisbursement.toLocaleString()}`
         });
         res.status(201).json({
@@ -245,12 +270,114 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
         res.status(400).json({ error: message });
     }
 });
+// POST /api/loans/:id/restructure - Owner only
+router.post('/:id/restructure', auth_1.requireOwner, async (req, res) => {
+    try {
+        const body = restructureSchema.parse(req.body);
+        const oldLoanId = req.params.id;
+        const { data: oldLoan } = await supabase_1.supabase.from('loans').select('*').eq('id', oldLoanId).single();
+        // Ensure both old and new loans belong to user's branch (owner bypass)
+        if (req.user?.role !== 'owner' && oldLoan.branch_id !== req.user?.branch_id) {
+            res.status(403).json({ error: 'Cannot restructure loan from another branch' });
+            return;
+        }
+        if (oldLoan.status === 'closed' || oldLoan.status === 'restructured') {
+            res.status(400).json({ error: 'Cannot restructure a closed or already restructured loan' });
+            return;
+        }
+        const today = (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
+        const calc = (0, loanCalculator_1.calculateLoanProduct)({
+            grossLoanAmount: Number(oldLoan.remaining_balance),
+            insuranceFeePercent: 0,
+            insuranceFeeFixed: 0,
+            documentationFee: 0,
+            interestRatePerPeriod: body.new_interest_rate_per_period,
+            termCount: body.new_term_count,
+            repaymentFrequency: body.repayment_frequency,
+            creditDate: today
+        });
+        // Create new loan
+        const { data: newLoan, error: loanErr } = await supabase_1.supabase.from('loans').insert({
+            customer_id: oldLoan.customer_id,
+            branch_id: oldLoan.branch_id,
+            principal_amount: calc.grossLoanAmount,
+            gross_loan_amount: calc.grossLoanAmount,
+            insurance_fee_percent: 0,
+            insurance_fee_amount: 0,
+            insurance_fee_fixed: 0,
+            documentation_fee: 0,
+            net_disbursement: calc.grossLoanAmount,
+            interest_rate: body.new_interest_rate_per_period,
+            interest_rate_per_period: body.new_interest_rate_per_period,
+            interest_type: body.repayment_frequency === 'daily' ? 'daily' : 'monthly',
+            repayment_frequency: body.repayment_frequency,
+            duration_months: Math.max(1, Math.ceil(calc.totalDurationDays / 30)),
+            term_count: body.new_term_count,
+            start_date: calc.creditDate,
+            credit_date: calc.creditDate,
+            first_collection_date: calc.firstCollectionDate,
+            end_date: calc.endDate,
+            total_interest: calc.totalInterest,
+            total_payable: calc.totalPayable,
+            installment_amount: calc.installmentAmount,
+            remaining_balance: calc.totalPayable,
+            next_due_date: calc.firstCollectionDate,
+            purpose: `Restructured from ${oldLoan.loan_code}`,
+            status: 'active',
+            approval_status: 'approved',
+            applied_by: req.user.id,
+            in_charge_user_id: oldLoan.in_charge_user_id,
+            created_by: req.user.id,
+            approved_by: req.user.id,
+            approved_at: new Date().toISOString()
+        }).select().single();
+        if (loanErr || !newLoan) {
+            throw loanErr;
+        }
+        const scheduleRows = calc.schedule.map(s => ({
+            loan_id: newLoan.id,
+            installment_number: s.installmentNumber,
+            due_date: s.dueDate,
+            principal_amount: s.principalAmount,
+            interest_amount: s.interestAmount,
+            installment_amount: s.installmentAmount,
+            status: 'pending'
+        }));
+        await supabase_1.supabase.from('loan_schedule').insert(scheduleRows);
+        // Update old loan
+        await supabase_1.supabase.from('loans').update({ status: 'restructured', updated_by: req.user.id }).eq('id', oldLoan.id);
+        await supabase_1.supabase.from('loan_schedule').delete().eq('loan_id', oldLoan.id).in('status', ['pending', 'partial', 'overdue']);
+        await supabase_1.supabase.from('activity_logs').insert({
+            user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
+            action: 'UPDATE', entity_type: 'loan',
+            entity_id: oldLoan.id, entity_code: oldLoan.loan_code,
+            branch_id: req.user.branch_id,
+            description: `Restructured loan into new loan ${newLoan.loan_code}`
+        });
+        res.status(201).json({ data: newLoan, message: 'Loan restructured successfully' });
+    }
+    catch (err) {
+        if (err instanceof zod_1.z.ZodError) {
+            res.status(400).json({ error: 'Validation error', details: err.errors });
+            return;
+        }
+        res.status(500).json({ error: 'Failed to restructure loan' });
+    }
+});
 router.put('/:id/status', auth_1.requireAdmin, async (req, res) => {
     const { status, notes } = req.body;
     const validStatuses = ['active', 'closed', 'overdue', 'restructured'];
     if (!validStatuses.includes(status)) {
         res.status(400).json({ error: 'Invalid status' });
         return;
+    }
+    // Ensure loan belongs to user's branch for status updates
+    if (req.user?.role !== 'owner') {
+        const { data: loanCheck } = await supabase_1.supabase.from('loans').select('branch_id').eq('id', req.params.id).single();
+        if (!loanCheck || loanCheck.branch_id !== req.user?.branch_id) {
+            res.status(403).json({ error: 'Cannot modify loan from another branch' });
+            return;
+        }
     }
     const { data: existing } = await supabase_1.supabase
         .from('loans')

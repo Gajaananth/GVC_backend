@@ -7,6 +7,7 @@ const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
 const applyPayment_1 = require("../utils/applyPayment");
 const applySavings_1 = require("../utils/applySavings");
+const sms_1 = require("../utils/sms");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 const requireStaff = (0, auth_1.requireRole)('staff');
@@ -310,7 +311,7 @@ router.post('/reconciliation', auth_1.requireAdmin, async (req, res) => {
 router.post('/payments/:id/approve', auth_1.requireAdmin, async (req, res) => {
     const { data: payment } = await supabase_1.supabase
         .from('loan_payments')
-        .select('*')
+        .select('*, loans(loan_code), customers(full_name, phone)')
         .eq('id', req.params.id)
         .single();
     if (!payment || payment.approval_status !== 'pending_admin') {
@@ -333,6 +334,11 @@ router.post('/payments/:id/approve', auth_1.requireAdmin, async (req, res) => {
         approved_by: req.user.id,
         approved_at: new Date().toISOString()
     }).eq('id', payment.id);
+    // Send SMS Receipt
+    if (payment.customers && payment.customers.phone) {
+        const message = `Dear ${payment.customers.full_name}, your payment of LKR ${payment.amount} for loan ${payment.loans.loan_code} has been approved. Thank you. GVC Agro Finance.`;
+        await (0, sms_1.sendSMS)(payment.customers.phone, message);
+    }
     res.json({ message: 'Collection approved and applied to loan' });
 });
 // POST /api/collections/payments/:id/reject
