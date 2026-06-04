@@ -98,17 +98,55 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   res.json({ data: { ...customer, loans: loans || [], savings: savings || [], documents: documents || [] } });
 });
 
+import multer from 'multer';
+import { uploadCustomerFile } from '../utils/storage';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
+
 // POST /api/customers — admin/owner only (staff cannot create)
-router.post('/', requireCustomerAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post(
+  '/', 
+  requireCustomerAdmin, 
+  upload.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'nic_front', maxCount: 1 },
+    { name: 'nic_back', maxCount: 1 },
+    { name: 'home_photo', maxCount: 1 },
+    { name: 'shop_photo', maxCount: 1 },
+    { name: 'application_form', maxCount: 1 }
+  ]),
+  async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const body = customerSchema.parse(req.body);
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     
-    // Validate that critical image URLs are provided
-    if (!body.photo_url || !body.nic_front_url || !body.nic_back_url) {
-      res.status(400).json({ error: 'Missing required profile or identification images' });
+    // Validate that critical image files are provided in the upload
+    if (!files?.photo?.[0] || !files?.nic_front?.[0] || !files?.nic_back?.[0]) {
+      res.status(400).json({ error: 'Missing required profile or identification images. Face photo, NIC Front, and NIC Back are mandatory.' });
       return;
     }
 
+    // Since it's multipart/form-data, req.body fields are strings.
+    // Parse them carefully using our schema but omitting the URL fields since they will be generated.
+    const schemaWithoutUrls = customerSchema.omit({
+      photo_url: true,
+      nic_front_url: true,
+      nic_back_url: true,
+      home_photo_url: true,
+      shop_photo_url: true,
+      application_form_url: true
+    });
+    
+    // Need to parse stringified numbers if needed
+    const parsedBody = {
+      ...req.body,
+      monthly_income: req.body.monthly_income ? Number(req.body.monthly_income) : undefined
+    };
+    
+    const body = schemaWithoutUrls.parse(parsedBody);
+    
     const { registered_by_staff_id, assigned_staff_id, ...customerFields } = body;
     const staffId = assigned_staff_id || registered_by_staff_id;
 
@@ -124,39 +162,76 @@ router.post('/', requireCustomerAdmin, async (req: AuthRequest, res: Response): 
       }
     }
 
-    const { data, error } = await supabase
+    // Insert customer row first to get the ID, we will update the URLs immediately after
+    const { data: customer, error: insertError } = await supabase
       .from('customers')
       .insert({
         ...customerFields,
         registered_by_staff_id: registered_by_staff_id || staffId || null,
         assigned_staff_id: staffId || null,
         branch_id: req.user!.branch_id,
-        created_by: req.user!.id
+        created_by: req.user!.id,
+        photo_url: 'pending', // Temporary placeholder
+        nic_front_url: 'pending',
+        nic_back_url: 'pending'
       })
       .select()
       .single();
 
-    if (error) {
-      if (error.code === '23505') {
+    if (insertError) {
+      if (insertError.code === '23505') {
         res.status(409).json({ error: 'NIC number already exists' });
       } else {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: insertError.message });
       }
       return;
     }
 
-    await supabase.from('activity_logs').insert({
-      user_id: req.user!.id, user_name: req.user!.full_name, user_role: req.user!.role,
-      action: 'CREATE', entity_type: 'customer',
-      entity_id: data.id, entity_code: data.customer_code,
-      branch_id: req.user!.branch_id,
-      description: `Created customer: ${data.full_name}`
-    });
+    // Now upload the files to storage using the generated customer ID
+    try {
+      const photoUpload = await uploadCustomerFile(customer.id, 'photo', files.photo[0]);
+      const nicFrontUpload = await uploadCustomerFile(customer.id, 'nic_front', files.nic_front[0]);
+      const nicBackUpload = await uploadCustomerFile(customer.id, 'nic_back', files.nic_back[0]);
+      
+      const homePhotoUpload = files.home_photo?.[0] ? await uploadCustomerFile(customer.id, 'home_photo', files.home_photo[0]) : null;
+      const shopPhotoUpload = files.shop_photo?.[0] ? await uploadCustomerFile(customer.id, 'shop_photo', files.shop_photo[0]) : null;
+      const appFormUpload = files.application_form?.[0] ? await uploadCustomerFile(customer.id, 'application_form', files.application_form[0]) : null;
 
-    res.status(201).json({ data, message: 'Customer created successfully' });
+      const updateData: any = {
+        photo_url: photoUpload.url,
+        nic_front_url: nicFrontUpload.url,
+        nic_back_url: nicBackUpload.url,
+      };
+      if (homePhotoUpload) updateData.home_photo_url = homePhotoUpload.url;
+      if (shopPhotoUpload) updateData.shop_photo_url = shopPhotoUpload.url;
+      if (appFormUpload) updateData.application_form_url = appFormUpload.url;
+
+      const { data: updatedCustomer, error: updateError } = await supabase
+        .from('customers')
+        .update(updateData)
+        .eq('id', customer.id)
+        .select()
+        .single();
+        
+      if (updateError) throw updateError;
+
+      await supabase.from('activity_logs').insert({
+        user_id: req.user!.id, user_name: req.user!.full_name, user_role: req.user!.role,
+        action: 'CREATE', entity_type: 'customer',
+        entity_id: customer.id, entity_code: customer.customer_code,
+        branch_id: req.user!.branch_id,
+        description: `Created customer with files: ${customer.full_name}`
+      });
+
+      res.status(201).json({ data: updatedCustomer, message: 'Customer and required documents created successfully' });
+    } catch (uploadErr) {
+      // If uploads fail, we should probably rollback the customer creation or mark it as inactive/error
+      await supabase.from('customers').delete().eq('id', customer.id);
+      throw new Error(`Failed to upload images: ${uploadErr instanceof Error ? uploadErr.message : 'Unknown error'}`);
+    }
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
-    res.status(500).json({ error: 'Failed to create customer' });
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to create customer' });
   }
 });
 
