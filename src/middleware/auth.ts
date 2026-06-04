@@ -30,13 +30,18 @@ export const authenticateJWT = async (
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      id: string; email: string; role: string; full_name: string; user_code: string; branch_id: string; branch_name?: string;
+      id: string;
+      email: string;
+      role: string;
+      full_name: string;
+      user_code: string;
+      branch_id: string;
     };
 
     // Verify user still exists and is active
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, role, full_name, user_code, is_active, branch_id, branches(branch_name)')
+      .select('id, email, role, full_name, user_code, is_active, branch_id')
       .eq('id', decoded.id)
       .single();
 
@@ -45,14 +50,13 @@ export const authenticateJWT = async (
       return;
     }
 
-    req.user = { 
+    req.user = {
       id: user.id,
       email: user.email,
       role: user.role,
       full_name: user.full_name,
       user_code: user.user_code,
-      branch_id: user.branch_id,
-      branch_name: (user as any).branches?.[0]?.branch_name
+      branch_id: user.branch_id
     };
     next();
   } catch {
