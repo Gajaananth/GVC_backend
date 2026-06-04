@@ -32,7 +32,7 @@ const authenticateJWT = async (req, res, next) => {
             full_name: user.full_name,
             user_code: user.user_code,
             branch_id: user.branch_id,
-            branch_name: user.branches?.branch_name
+            branch_name: user.branches?.[0]?.branch_name
         };
         next();
     }

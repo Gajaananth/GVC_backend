@@ -46,13 +46,13 @@ export const authenticateJWT = async (
     }
 
     req.user = { 
-      id: user.id, 
-      email: user.email, 
-      role: user.role, 
-      full_name: user.full_name, 
-      user_code: user.user_code, 
-      branch_id: user.branch_id, 
-      branch_name: user.branches?.branch_name 
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      full_name: user.full_name,
+      user_code: user.user_code,
+      branch_id: user.branch_id,
+      branch_name: (user as any).branches?.[0]?.branch_name
     };
     next();
   } catch {
