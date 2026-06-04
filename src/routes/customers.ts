@@ -36,7 +36,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
   let query = supabase
     .from('customers')
-    .select('*, loans(id, loan_code, status, remaining_balance, approval_status), assigned_staff:assigned_staff_id(id, full_name)', { count: 'exact' })
+    .select('*, loans(id, loan_code, status, remaining_balance, approval_status), assigned_staff:users!assigned_staff_id(id, full_name)', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(offset, offset + limitNum - 1);
 
@@ -72,8 +72,8 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     .select(`
       id, loan_code, principal_amount, remaining_balance, status, approval_status,
       start_date, end_date, next_due_date,
-      applied_by_user:applied_by(id, full_name),
-      in_charge_user:in_charge_user_id(id, full_name)
+      applied_by_user:users!applied_by(id, full_name),
+      in_charge_user:users!in_charge_user_id(id, full_name)
     `)
     .eq('customer_id', req.params.id)
     .order('created_at', { ascending: false });
