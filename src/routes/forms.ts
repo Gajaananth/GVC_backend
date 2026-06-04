@@ -30,7 +30,8 @@ router.post('/submit', requireStaff, async (req: AuthRequest, res: Response): Pr
       .insert({
         ...body,
         submitted_by: req.user!.id,
-        status: 'pending_admin'
+        status: 'pending_admin',
+        branch_id: req.user!.branch_id
       })
       .select(`
         *,
@@ -51,7 +52,8 @@ router.post('/submit', requireStaff, async (req: AuthRequest, res: Response): Pr
       action: 'SUBMIT',
       entity_type: 'physical_form',
       entity_id: data.id,
-      description: `Staff submitted physical form to admin (${body.form_type})`
+      description: `Staff submitted physical form to admin (${body.form_type})`,
+      branch_id: req.user!.branch_id
     });
 
     res.status(201).json({
@@ -68,16 +70,22 @@ router.post('/submit', requireStaff, async (req: AuthRequest, res: Response): Pr
 });
 
 // GET /api/forms/pending — admin/owner
-router.get('/pending', requireAdmin, async (_req: AuthRequest, res: Response): Promise<void> => {
-  const { data, error } = await supabase
+router.get('/pending', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  let pendingQuery = supabase
     .from('physical_form_submissions')
     .select(`
       *,
       customers(id, customer_code, full_name, phone, nic_number),
       submitter:submitted_by(id, full_name)
     `)
-    .eq('status', 'pending_admin')
-    .order('created_at', { ascending: false });
+    .eq('status', 'pending_admin');
+
+  // Apply branch isolation for non-owner roles
+  if (req.user?.role !== 'owner') {
+    pendingQuery = pendingQuery.eq('branch_id', req.user?.branch_id);
+  }
+
+  const { data, error } = await pendingQuery.order('created_at', { ascending: false });
 
   if (error) {
     res.status(500).json({ error: error.message });

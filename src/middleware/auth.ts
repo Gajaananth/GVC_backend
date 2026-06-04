@@ -6,9 +6,8 @@ export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
-    role: string;
-    full_name: string;
-    user_code: string;
+    branch_id: string;
+    branch_name?: string;
   };
 }
 
@@ -28,13 +27,13 @@ export const authenticateJWT = async (
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      id: string; email: string; role: string; full_name: string; user_code: string;
+      id: string; email: string; role: string; full_name: string; user_code: string; branch_id: string; branch_name?: string;
     };
 
     // Verify user still exists and is active
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, role, full_name, user_code, is_active')
+      .select('id, email, role, full_name, user_code, is_active, branch_id, branch_name')
       .eq('id', decoded.id)
       .single();
 
@@ -43,7 +42,7 @@ export const authenticateJWT = async (
       return;
     }
 
-    req.user = { id: user.id, email: user.email, role: user.role, full_name: user.full_name, user_code: user.user_code };
+    req.user = { id: user.id, email: user.email, role: user.role, full_name: user.full_name, user_code: user.user_code, branch_id: user.branch_id, branch_name: user.branch_name };
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });

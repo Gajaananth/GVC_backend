@@ -34,6 +34,7 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
           .select(`payment_code, payment_date, amount, payment_type, payment_method, loans(loan_code), customers(full_name, customer_code, phone)`)
           .gte('payment_date', sDate)
           .lte('payment_date', eDate)
+          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); })
           .order('payment_date', { ascending: false });
 
         const total = (data || []).reduce((sum, p) => sum + p.amount, 0);
@@ -46,19 +47,22 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
           .from('loan_payments')
           .select('amount, payment_date, payment_type')
           .gte('payment_date', sDate)
-          .lte('payment_date', eDate);
+          .lte('payment_date', eDate)
+          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); });
 
         const { data: newLoans } = await supabase
           .from('loans')
           .select('principal_amount, start_date')
           .gte('start_date', sDate)
-          .lte('start_date', eDate);
+          .lte('start_date', eDate)
+          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); });
 
         const { data: savings } = await supabase
           .from('savings_transactions')
           .select('amount, transaction_type, transaction_date')
           .gte('transaction_date', sDate)
-          .lte('transaction_date', eDate);
+          .lte('transaction_date', eDate)
+          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); });
 
         const totalCollections = (payments || []).reduce((s, p) => s + p.amount, 0);
         const totalDisbursed = (newLoans || []).reduce((s, l) => s + l.principal_amount, 0);
@@ -80,6 +84,7 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
         const { data } = await supabase
           .from('loans')
           .select(`*, customers(full_name, customer_code, phone)`)
+          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); })
           .order('created_at', { ascending: false });
 
         const summary = {
@@ -98,6 +103,7 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
         const { data } = await supabase
           .from('savings_accounts')
           .select(`*, customers(full_name, customer_code, phone)`)
+          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); })
           .order('created_at', { ascending: false });
 
         const summary = {
@@ -115,7 +121,8 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       case 'customer_wise': {
         const query = supabase
           .from('customers')
-          .select(`*, loans(id, loan_code, principal_amount, remaining_balance, status), savings_accounts(id, account_code, balance)`);
+          .select(`*, loans(id, loan_code, principal_amount, remaining_balance, status), savings_accounts(id, account_code, balance)`)
+          .modify((q) => { if (req.user?.role !== 'owner') q.eq('branch_id', req.user?.branch_id); });
 
         if (customer_id) query.eq('id', customer_id);
 
@@ -128,6 +135,7 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
         const { data } = await supabase
           .from('v_overdue_loans')
           .select('*')
+          .modify((q) => { if (req.user?.role !== 'owner') q.eq('branch_id', req.user?.branch_id); })
           .order('days_overdue', { ascending: false });
 
         const totalDue = (data || []).reduce((s, l) => s + l.remaining_balance, 0);
@@ -140,7 +148,8 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
           .from('loan_payments')
           .select('amount, interest_paid, payment_date, payment_method')
           .gte('payment_date', sDate)
-          .lte('payment_date', eDate);
+          .lte('payment_date', eDate)
+          .modify((q) => { if (req.user?.role !== 'owner') q.eq('branch_id', req.user?.branch_id); });
 
         const totalIncome = (payments || []).reduce((s, p) => s + (p.interest_paid || 0), 0);
         reportData = {
@@ -164,7 +173,8 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       period_end: eDate,
       parameters: { customer_id },
       data: reportData as Record<string, unknown>,
-      generated_by: req.user!.id
+      generated_by: req.user!.id,
+      branch_id: req.user!.branch_id
     });
 
     res.json({ data: reportData, type, generated_at: today.toISOString() });

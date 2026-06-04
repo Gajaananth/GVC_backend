@@ -11,14 +11,16 @@ const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   full_name: z.string().min(2),
-  role: z.enum(['owner', 'admin', 'staff', 'view_only']),
+  role: z.enum(['owner', 'branch_manager', 'admin', 'staff', 'view_only']),
   mobile: z.string().optional(),
-  address: z.string().optional()
+  address: z.string().optional(),
+  branch_id: z.string().uuid().optional() // Owner may omit
 });
 
 const updateUserSchema = createUserSchema.partial().omit({ password: true }).extend({
   password: z.string().min(8).optional(),
-  is_active: z.boolean().optional()
+  is_active: z.boolean().optional(),
+  branch_id: z.string().uuid().optional()
 });
 
 // GET /api/users - list all users (admin+)

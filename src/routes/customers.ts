@@ -40,6 +40,11 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     .order('created_at', { ascending: false })
     .range(offset, offset + limitNum - 1);
 
+   // Add branch filter for non-owner roles
+   if (req.user?.role !== 'owner') {
+     query = query.eq('branch_id', req.user!.branch_id);
+   }
+
   if (search) {
     const safeSearch = (search as string).replace(/"/g, '');
     query = query.or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%"`);
@@ -118,6 +123,7 @@ router.post('/', requireCustomerAdmin, async (req: AuthRequest, res: Response): 
         ...customerFields,
         registered_by_staff_id: registered_by_staff_id || staffId || null,
         assigned_staff_id: staffId || null,
+        branch_id: req.user!.branch_id,
         created_by: req.user!.id
       })
       .select()
@@ -136,6 +142,7 @@ router.post('/', requireCustomerAdmin, async (req: AuthRequest, res: Response): 
       user_id: req.user!.id, user_name: req.user!.full_name, user_role: req.user!.role,
       action: 'CREATE', entity_type: 'customer',
       entity_id: data.id, entity_code: data.customer_code,
+      branch_id: req.user!.branch_id,
       description: `Created customer: ${data.full_name}`
     });
 
