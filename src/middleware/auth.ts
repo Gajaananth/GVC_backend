@@ -6,6 +6,9 @@ export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
+    role: string;
+    full_name: string;
+    user_code: string;
     branch_id: string;
     branch_name?: string;
   };
@@ -64,9 +67,9 @@ export const requireRole = (...roles: string[]) => {
 };
 
 // Middleware: owner or admin only
-export const requireAdmin = requireRole('owner', 'admin');
+export const requireAdmin = requireRole('owner', 'admin', 'branch_manager', 'cashier');
 // Admin + owner for customer create & document uploads (staff cannot)
-export const requireCustomerAdmin = requireRole('owner', 'admin');
+export const requireCustomerAdmin = requireRole('owner', 'admin', 'branch_manager', 'cashier');
 // Middleware: any authenticated user except view_only can write (payments, etc.)
 export const requireWrite = requireRole('owner', 'admin', 'staff');
 // Middleware: owner only

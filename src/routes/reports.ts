@@ -29,45 +29,50 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
 
     switch (type) {
       case 'daily_collection': {
-        const { data } = await supabase
+        let query = supabase
           .from('loan_payments')
           .select(`payment_code, payment_date, amount, payment_type, payment_method, loans(loan_code), customers(full_name, customer_code, phone)`)
           .gte('payment_date', sDate)
           .lte('payment_date', eDate)
-          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); })
           .order('payment_date', { ascending: false });
 
-        const total = (data || []).reduce((sum, p) => sum + p.amount, 0);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+
+        const { data } = await query;
+        const total = (data || []).reduce((sum: number, p: any) => sum + p.amount, 0);
         reportData = { payments: data || [], total_collected: total, period: { start: sDate, end: eDate } };
         break;
       }
 
       case 'monthly_finance': {
-        const { data: payments } = await supabase
+        let paymentsQuery = supabase
           .from('loan_payments')
           .select('amount, payment_date, payment_type')
           .gte('payment_date', sDate)
-          .lte('payment_date', eDate)
-          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); });
+          .lte('payment_date', eDate);
+        if (req.user?.role !== 'owner') paymentsQuery = paymentsQuery.eq('branch_id', req.user?.branch_id);
+        const { data: payments } = await paymentsQuery;
 
-        const { data: newLoans } = await supabase
+        let newLoansQuery = supabase
           .from('loans')
           .select('principal_amount, start_date')
           .gte('start_date', sDate)
-          .lte('start_date', eDate)
-          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); });
+          .lte('start_date', eDate);
+        if (req.user?.role !== 'owner') newLoansQuery = newLoansQuery.eq('branch_id', req.user?.branch_id);
+        const { data: newLoans } = await newLoansQuery;
 
-        const { data: savings } = await supabase
+        let savingsQuery = supabase
           .from('savings_transactions')
           .select('amount, transaction_type, transaction_date')
           .gte('transaction_date', sDate)
-          .lte('transaction_date', eDate)
-          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); });
+          .lte('transaction_date', eDate);
+        if (req.user?.role !== 'owner') savingsQuery = savingsQuery.eq('branch_id', req.user?.branch_id);
+        const { data: savings } = await savingsQuery;
 
-        const totalCollections = (payments || []).reduce((s, p) => s + p.amount, 0);
-        const totalDisbursed = (newLoans || []).reduce((s, l) => s + l.principal_amount, 0);
-        const totalDeposits = (savings || []).filter(s => s.transaction_type === 'deposit').reduce((s, t) => s + t.amount, 0);
-        const totalWithdrawals = (savings || []).filter(s => s.transaction_type === 'withdrawal').reduce((s, t) => s + t.amount, 0);
+        const totalCollections = (payments || []).reduce((s: number, p: any) => s + p.amount, 0);
+        const totalDisbursed = (newLoans || []).reduce((s: number, l: any) => s + l.principal_amount, 0);
+        const totalDeposits = (savings || []).filter((s: any) => s.transaction_type === 'deposit').reduce((s: number, t: any) => s + t.amount, 0);
+        const totalWithdrawals = (savings || []).filter((s: any) => s.transaction_type === 'withdrawal').reduce((s: number, t: any) => s + t.amount, 0);
 
         reportData = {
           period: { start: sDate, end: eDate },
@@ -81,48 +86,51 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       }
 
       case 'loan_summary': {
-        const { data } = await supabase
+        let query = supabase
           .from('loans')
           .select(`*, customers(full_name, customer_code, phone)`)
-          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); })
           .order('created_at', { ascending: false });
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
 
         const summary = {
           total: (data || []).length,
-          active: (data || []).filter(l => l.status === 'active').length,
-          closed: (data || []).filter(l => l.status === 'closed').length,
-          overdue: (data || []).filter(l => l.status === 'overdue').length,
-          total_disbursed: (data || []).reduce((s, l) => s + l.principal_amount, 0),
-          total_outstanding: (data || []).filter(l => l.status !== 'closed').reduce((s, l) => s + l.remaining_balance, 0)
+          active: (data || []).filter((l: any) => l.status === 'active').length,
+          closed: (data || []).filter((l: any) => l.status === 'closed').length,
+          overdue: (data || []).filter((l: any) => l.status === 'overdue').length,
+          total_disbursed: (data || []).reduce((s: number, l: any) => s + l.principal_amount, 0),
+          total_outstanding: (data || []).filter((l: any) => l.status !== 'closed').reduce((s: number, l: any) => s + l.remaining_balance, 0)
         };
         reportData = { loans: data, summary };
         break;
       }
 
       case 'savings_summary': {
-        const { data } = await supabase
+        let query = supabase
           .from('savings_accounts')
           .select(`*, customers(full_name, customer_code, phone)`)
-          .modify((query) => { if (req.user?.role !== 'owner') query.eq('branch_id', req.user?.branch_id); })
           .order('created_at', { ascending: false });
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
 
         const summary = {
           total_accounts: (data || []).length,
-          active_accounts: (data || []).filter(a => a.is_active).length,
-          total_balance: (data || []).reduce((s, a) => s + a.balance, 0),
-          total_deposited: (data || []).reduce((s, a) => s + a.total_deposited, 0),
-          total_withdrawn: (data || []).reduce((s, a) => s + a.total_withdrawn, 0),
-          total_interest_earned: (data || []).reduce((s, a) => s + a.total_interest_earned, 0)
+          active_accounts: (data || []).filter((a: any) => a.is_active).length,
+          total_balance: (data || []).reduce((s: number, a: any) => s + a.balance, 0),
+          total_deposited: (data || []).reduce((s: number, a: any) => s + a.total_deposited, 0),
+          total_withdrawn: (data || []).reduce((s: number, a: any) => s + a.total_withdrawn, 0),
+          total_interest_earned: (data || []).reduce((s: number, a: any) => s + a.total_interest_earned, 0)
         };
         reportData = { accounts: data, summary };
         break;
       }
 
       case 'customer_wise': {
-        const query = supabase
+        let query = supabase
           .from('customers')
-          .select(`*, loans(id, loan_code, principal_amount, remaining_balance, status), savings_accounts(id, account_code, balance)`)
-          .modify((q) => { if (req.user?.role !== 'owner') q.eq('branch_id', req.user?.branch_id); });
+          .select(`*, loans(id, loan_code, principal_amount, remaining_balance, status), savings_accounts(id, account_code, balance)`);
+        
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
 
         if (customer_id) query.eq('id', customer_id);
 
@@ -132,26 +140,28 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       }
 
       case 'due_payment': {
-        const { data } = await supabase
+        let query = supabase
           .from('v_overdue_loans')
           .select('*')
-          .modify((q) => { if (req.user?.role !== 'owner') q.eq('branch_id', req.user?.branch_id); })
           .order('days_overdue', { ascending: false });
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
 
-        const totalDue = (data || []).reduce((s, l) => s + l.remaining_balance, 0);
+        const totalDue = (data || []).reduce((s: number, l: any) => s + l.remaining_balance, 0);
         reportData = { overdue_loans: data, total_outstanding: totalDue };
         break;
       }
 
       case 'income': {
-        const { data: payments } = await supabase
+        let query = supabase
           .from('loan_payments')
           .select('amount, interest_paid, payment_date, payment_method')
           .gte('payment_date', sDate)
-          .lte('payment_date', eDate)
-          .modify((q) => { if (req.user?.role !== 'owner') q.eq('branch_id', req.user?.branch_id); });
+          .lte('payment_date', eDate);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data: payments } = await query;
 
-        const totalIncome = (payments || []).reduce((s, p) => s + (p.interest_paid || 0), 0);
+        const totalIncome = (payments || []).reduce((s: number, p: any) => s + (p.interest_paid || 0), 0);
         reportData = {
           period: { start: sDate, end: eDate },
           payments: payments || [],
