@@ -17,10 +17,11 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const searchQuery = `%${q}%`;
 
     // Search Customers
+    const safeSearch = (q as string).replace(/"/g, '');
     const { data: customers } = await supabase
       .from('customers')
-      .select('id, full_name, nic_number, customer_code, phone')
-      .or(`full_name.ilike.${searchQuery},nic_number.ilike.${searchQuery},customer_code.ilike.${searchQuery},phone.ilike.${searchQuery}`)
+      .select('id, full_name, nic_number, customer_code, phone, photo_url')
+      .or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%"`)
       .limit(5);
 
     // Search Loans

@@ -4,13 +4,12 @@ import { authenticateJWT, requireOwner, AuthRequest } from '../middleware/auth';
 import multer from 'multer';
 import { parse } from 'csv-parse';
 import { stringify } from 'csv-stringify/sync';
-import fs from 'fs';
-import path from 'path';
 
 const router = Router();
 router.use(authenticateJWT);
+import { Readable } from 'stream';
 
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({ storage: multer.memoryStorage() });
 
 // POST /api/import-export/import/customers
 router.post('/import/customers', requireOwner, upload.single('file'), async (req: AuthRequest, res: Response): Promise<void> => {
@@ -21,7 +20,8 @@ router.post('/import/customers', requireOwner, upload.single('file'), async (req
 
   try {
     const results: any[] = [];
-    fs.createReadStream(req.file.path)
+    const stream = Readable.from(req.file.buffer);
+    stream
       .pipe(parse({ columns: true, skip_empty_lines: true }))
       .on('data', (data) => {
         results.push({
@@ -29,13 +29,12 @@ router.post('/import/customers', requireOwner, upload.single('file'), async (req
           nic_number: data.nic_number,
           phone: data.phone,
           address: data.address,
-          customer_code: data.customer_code || undefined, // Supabase triggers auto-gen if null usually, but let's assume valid data
+          customer_code: data.customer_code || undefined,
           created_by: req.user!.id
         });
       })
       .on('end', async () => {
         const { data, error } = await supabase.from('customers').insert(results).select();
-        fs.unlinkSync(req.file!.path); // Clean up
 
         if (error) {
           res.status(500).json({ error: error.message });
@@ -45,7 +44,6 @@ router.post('/import/customers', requireOwner, upload.single('file'), async (req
         res.json({ message: `Successfully imported ${data.length} customers` });
       });
   } catch (error) {
-    fs.unlinkSync(req.file.path);
     res.status(500).json({ error: 'Failed to process CSV' });
   }
 });

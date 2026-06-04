@@ -98,7 +98,10 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     query = query.eq('in_charge_user_id', staff_id as string);
   }
 
-  if (search) query = query.or(`loan_code.ilike.%${search}%`);
+  if (search) {
+    const safeSearch = (search as string).replace(/"/g, '');
+    query = query.or(`loan_code.ilike."%${safeSearch}%"`);
+  }
   if (status) query = query.eq('status', status);
   if (approval_status) query = query.eq('approval_status', approval_status);
   if (customer_id) query = query.eq('customer_id', customer_id);

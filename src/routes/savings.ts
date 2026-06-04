@@ -42,7 +42,10 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
   if (customer_id) query = query.eq('customer_id', customer_id);
   if (account_type) query = query.eq('account_type', account_type);
-  if (search) query = query.or(`account_code.ilike.%${search}%`);
+  if (search) {
+    const safeSearch = (search as string).replace(/"/g, '');
+    query = query.or(`account_code.ilike."%${safeSearch}%"`);
+  }
 
   const { data, error, count } = await query;
   if (error) { res.status(500).json({ error: error.message }); return; }

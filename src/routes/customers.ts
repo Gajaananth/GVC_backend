@@ -41,7 +41,8 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     .range(offset, offset + limitNum - 1);
 
   if (search) {
-    query = query.or(`full_name.ilike.%${search}%,nic_number.ilike.%${search}%,phone.ilike.%${search}%,customer_code.ilike.%${search}%`);
+    const safeSearch = (search as string).replace(/"/g, '');
+    query = query.or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%"`);
   }
 
   if (status === 'active') {
