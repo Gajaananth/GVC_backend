@@ -1,6 +1,7 @@
 import { supabase } from '../config/supabase';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import sharp from 'sharp';
 
 const BUCKET = process.env.STORAGE_BUCKET || 'gvc-finance-files';
 
@@ -23,6 +24,15 @@ export async function uploadCustomerFile(
   }
   if (file.size > MAX_BYTES) {
     throw new Error('File size must be under 10MB');
+  }
+
+  // Validate image dimensions for face photo (minimum 300x300)
+  if (documentType === 'photo') {
+    const metadata = await sharp(file.buffer).metadata();
+    if (!metadata.width || !metadata.height || metadata.width < 300 || metadata.height < 300) {
+      throw new Error('Face photo must be at least 300x300 pixels');
+    }
+    // NOTE: Advanced face detection could be added here.
   }
 
   const ext = path.extname(file.originalname) || (file.mimetype === 'application/pdf' ? '.pdf' : '.jpg');
@@ -49,5 +59,6 @@ export const DOCUMENT_FIELD_MAP: Record<string, string> = {
   photo: 'photo_url',
   application_form: 'application_form_url',
   home_photo: 'home_photo_url',
-  shop_photo: 'shop_photo_url'
+  shop_photo: 'shop_photo_url',
+  loan_form: 'loan_form_url'
 };

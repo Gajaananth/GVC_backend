@@ -16,9 +16,9 @@ const customerSchema = z.object({
   gender: z.enum(['male', 'female', 'other']).optional().nullable(),
   occupation: z.string().optional().nullable(),
   monthly_income: z.number().optional().nullable(),
-  photo_url: z.string().optional().nullable(),
-  nic_front_url: z.string().optional().nullable(),
-  nic_back_url: z.string().optional().nullable(),
+  photo_url: z.string().url().min(1),
+  nic_front_url: z.string().url().min(1),
+  nic_back_url: z.string().url().min(1),
   home_photo_url: z.string().optional().nullable(),
   shop_photo_url: z.string().optional().nullable(),
   application_form_url: z.string().optional().nullable(),
@@ -102,6 +102,13 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 router.post('/', requireCustomerAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = customerSchema.parse(req.body);
+    
+    // Validate that critical image URLs are provided
+    if (!body.photo_url || !body.nic_front_url || !body.nic_back_url) {
+      res.status(400).json({ error: 'Missing required profile or identification images' });
+      return;
+    }
+
     const { registered_by_staff_id, assigned_staff_id, ...customerFields } = body;
     const staffId = assigned_staff_id || registered_by_staff_id;
 
