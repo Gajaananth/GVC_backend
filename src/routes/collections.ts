@@ -672,33 +672,42 @@ router.post('/corrections/:id/execute', requireAdminOrOwner, async (req: AuthReq
 });
 
 // GET /api/collections/corrections/approved — admin/owner execute queue
-router.get('/corrections/approved', requireAdminOrOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
-  const { data: requests, error } = await supabase
-    .from('collection_correction_requests')
-    .select('*')
-    .eq('status', 'approved')
-    .order('owner_reviewed_at', { ascending: false });
+router.get('/corrections/approved', requireAdmin, async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { data: requests, error } = await supabase
+      .from('collection_correction_requests')
+      .select('*')
+      .eq('status', 'approved')
+      .order('owner_reviewed_at', { ascending: false });
 
-  if (error) {
-    res.status(500).json({ error: error.message });
-    return;
+    if (error) {
+      console.error('Supabase error on corrections/approved:', error);
+      res.status(500).json({ error: error.message });
+      return;
+    }
+
+    if (!requests || requests.length === 0) {
+      res.json({ data: [] });
+      return;
+    }
+
+    const userIds = [...new Set(requests.map(r => r.requested_by).filter(Boolean))];
+    let userMap = new Map<string, any>();
+    if (userIds.length > 0) {
+      const { data: users } = await supabase.from('users').select('id, full_name').in('id', userIds);
+      userMap = new Map((users || []).map(u => [u.id, u]));
+    }
+
+    const data = requests.map(r => ({
+      ...r,
+      requester: userMap.get(r.requested_by) || null
+    }));
+
+    res.json({ data });
+  } catch (err) {
+    console.error('Unhandled error in corrections/approved:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to load approved corrections' });
   }
-  
-  if (!requests || requests.length === 0) {
-    res.json({ data: [] });
-    return;
-  }
-
-  const userIds = [...new Set(requests.map(r => r.requested_by))];
-  const { data: users } = await supabase.from('users').select('id, full_name').in('id', userIds);
-  const userMap = new Map((users || []).map(u => [u.id, u]));
-
-  const data = requests.map(r => ({
-    ...r,
-    requester: userMap.get(r.requested_by) || null
-  }));
-
-  res.json({ data });
 });
 
 // GET /api/collections/daily-dues — staff (or admin) collection list for a date
