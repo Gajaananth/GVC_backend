@@ -96,6 +96,7 @@ router.get('/:id', async (req, res) => {
 });
 const multer_1 = __importDefault(require("multer"));
 const storage_1 = require("../utils/storage");
+const faceDetection_1 = require("../utils/faceDetection");
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 }
@@ -114,6 +115,12 @@ router.post('/', auth_1.requireCustomerAdmin, upload.fields([
         // Validate that critical image files are provided in the upload
         if (!files?.photo?.[0] || !files?.nic_front?.[0] || !files?.nic_back?.[0]) {
             res.status(400).json({ error: 'Missing required profile or identification images. Face photo, NIC Front, and NIC Back are mandatory.' });
+            return;
+        }
+        // Validate that the photo contains at least one face
+        const containsFace = await (0, faceDetection_1.hasFace)(files.photo[0].buffer);
+        if (!containsFace) {
+            res.status(400).json({ error: 'Invalid profile photo. The uploaded image must contain at least one visible human face.' });
             return;
         }
         // Since it's multipart/form-data, req.body fields are strings.

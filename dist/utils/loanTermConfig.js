@@ -12,7 +12,7 @@ exports.TERM_CONFIG = {
         max: 180,
         default: 90,
         presets: [30, 60, 90, 120, 180],
-        interestRateHint: 'Interest % charged each day on gross loan amount',
+        interestRateHint: 'Interest % charged per month on gross loan amount (collected daily)',
         collectionHint: 'First collection is the day after credit. Each installment is 1 day apart.'
     },
     weekly: {
@@ -23,7 +23,7 @@ exports.TERM_CONFIG = {
         max: 104,
         default: 12,
         presets: [4, 8, 12, 26, 52],
-        interestRateHint: 'Interest % charged each week on gross loan amount',
+        interestRateHint: 'Interest % charged per month on gross loan amount (collected weekly)',
         collectionHint: 'First collection is 7 days after credit. Each installment is 1 week apart.'
     },
     biweekly: {
@@ -34,7 +34,7 @@ exports.TERM_CONFIG = {
         max: 52,
         default: 6,
         presets: [2, 4, 6, 12, 26],
-        interestRateHint: 'Interest % charged each 14-day period on gross loan amount',
+        interestRateHint: 'Interest % charged per month on gross loan amount (collected every 14 days)',
         collectionHint: 'First collection is 14 days after credit. Each installment is 14 days apart.'
     },
     monthly: {
@@ -45,7 +45,7 @@ exports.TERM_CONFIG = {
         max: 120,
         default: 12,
         presets: [3, 6, 12, 24, 36, 60],
-        interestRateHint: 'Interest % charged each month on gross loan amount',
+        interestRateHint: 'Interest % charged per month on gross loan amount',
         collectionHint: 'First collection is 1 calendar month after credit. Each installment is monthly.'
     }
 };

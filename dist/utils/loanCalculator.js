@@ -60,9 +60,27 @@ function calculateLoanProduct(input) {
     }
     const netDisbursement = round2(gross - totalFees);
     const termCount = Math.max(1, Math.floor(input.termCount));
-    const rate = input.interestRatePerPeriod || 0;
+    const monthlyRate = input.interestRatePerPeriod || 0; // Always a MONTHLY rate
     const cfg = loanTermConfig_1.TERM_CONFIG[frequency];
-    const totalInterest = round2((gross * rate * termCount) / 100);
+    // Convert term count to equivalent months for interest calculation
+    // Interest is always monthly regardless of collection frequency
+    let durationInMonths;
+    switch (frequency) {
+        case 'daily':
+            durationInMonths = termCount / 30;
+            break;
+        case 'weekly':
+            durationInMonths = termCount / 4;
+            break;
+        case 'biweekly':
+            durationInMonths = termCount / 2;
+            break;
+        case 'monthly':
+        default:
+            durationInMonths = termCount;
+            break;
+    }
+    const totalInterest = round2((gross * monthlyRate * durationInMonths) / 100);
     const totalPayable = round2(gross + totalInterest);
     const installmentAmount = round2(totalPayable / termCount);
     const principalParts = splitAmount(gross, termCount);
@@ -94,7 +112,7 @@ function calculateLoanProduct(input) {
         totalFees,
         netDisbursement,
         principalForRepayment: gross,
-        interestRatePerPeriod: rate,
+        interestRatePerPeriod: monthlyRate,
         termCount,
         termUnit: cfg.unit,
         termSummary: (0, loanTermConfig_1.formatTermSummary)(frequency, termCount),

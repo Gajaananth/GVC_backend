@@ -18,7 +18,7 @@ const authenticateJWT = async (req, res, next) => {
         // Verify user still exists and is active
         const { data: user, error } = await supabase_1.supabase
             .from('users')
-            .select('id, email, role, full_name, user_code, is_active, branch_id, branches(branch_name)')
+            .select('id, email, role, full_name, user_code, is_active, branch_id')
             .eq('id', decoded.id)
             .single();
         if (error || !user || !user.is_active) {
@@ -31,8 +31,7 @@ const authenticateJWT = async (req, res, next) => {
             role: user.role,
             full_name: user.full_name,
             user_code: user.user_code,
-            branch_id: user.branch_id,
-            branch_name: user.branches?.[0]?.branch_name
+            branch_id: user.branch_id
         };
         next();
     }

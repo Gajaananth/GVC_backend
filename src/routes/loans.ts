@@ -5,6 +5,7 @@ import { authenticateJWT, requireAdmin, requireOwner, AuthRequest } from '../mid
 import { calculateLoanProduct } from '../utils/loanCalculator';
 import { TERM_CONFIG } from '../utils/loanTermConfig';
 import { format } from 'date-fns';
+import { generateLoanApplicationPDF, uploadLoanFormPDF } from '../utils/pdfGenerator';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -179,7 +180,7 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
 
     const { data: customer } = await supabase
       .from('customers')
-      .select('id, full_name, is_active, assigned_staff_id, branch_id')
+      .select('id, full_name, is_active, assigned_staff_id, branch_id, customer_code, phone, nic_number, address')
       .eq('id', body.customer_id)
       .single();
 
@@ -232,7 +233,7 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
         net_disbursement: calc.netDisbursement,
         interest_rate: body.interest_rate_per_period,
         interest_rate_per_period: body.interest_rate_per_period,
-        interest_type: body.repayment_frequency === 'daily' ? 'daily' : 'monthly',
+        interest_type: 'monthly',
         repayment_frequency: body.repayment_frequency,
         duration_months: Math.max(1, Math.ceil(calc.totalDurationDays / 30)),
         term_count: body.term_count,
@@ -264,6 +265,52 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
+    // Fetch staff names for the PDF
+    const { data: appliedByUser } = await supabase.from('users').select('full_name').eq('id', body.applied_by).single();
+    const { data: inChargeUser } = await supabase.from('users').select('full_name').eq('id', body.in_charge_user_id).single();
+
+    // Generate Loan Application PDF and upload to Supabase
+    let loanFormUrl: string | null = null;
+    try {
+      const pdfBuffer = await generateLoanApplicationPDF({
+        loanCode: loan.loan_code,
+        customerName: customer.full_name,
+        customerNic: customer.nic_number || '',
+        customerPhone: customer.phone || '',
+        customerAddress: customer.address || '',
+        customerCode: customer.customer_code || '',
+        grossLoanAmount: calc.grossLoanAmount,
+        netDisbursement: calc.netDisbursement,
+        insuranceFeeAmount: calc.insuranceFeeAmount,
+        documentationFee: calc.documentationFee,
+        totalFees: calc.totalFees,
+        interestRateMonthly: body.interest_rate_per_period,
+        totalInterest: calc.totalInterest,
+        totalPayable: calc.totalPayable,
+        installmentAmount: calc.installmentAmount,
+        termCount: calc.termCount,
+        repaymentFrequency: body.repayment_frequency,
+        creditDate: calc.creditDate,
+        firstCollectionDate: calc.firstCollectionDate,
+        endDate: calc.endDate,
+        purpose: body.purpose,
+        guarantorName: body.guarantor_name,
+        guarantorPhone: body.guarantor_phone,
+        collateralNotes: body.collateral_notes,
+        appliedByName: appliedByUser?.full_name || 'N/A',
+        inChargeName: inChargeUser?.full_name || 'N/A',
+        schedule: calc.schedule
+      });
+
+      loanFormUrl = await uploadLoanFormPDF(loan.id, loan.loan_code, pdfBuffer);
+
+      // Update the loan record with the PDF URL
+      await supabase.from('loans').update({ loan_form_url: loanFormUrl }).eq('id', loan.id);
+    } catch (pdfErr) {
+      // PDF generation failure should not block loan creation — log and continue
+      console.error('Failed to generate/upload loan form PDF:', pdfErr);
+    }
+
     await supabase.from('activity_logs').insert({
       user_id: req.user!.id, user_name: req.user!.full_name, user_role: req.user!.role,
       action: 'CREATE', entity_type: 'loan',
@@ -273,7 +320,7 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
     });
 
     res.status(201).json({
-      data: { ...loan, preview: calc },
+      data: { ...loan, loan_form_url: loanFormUrl, preview: calc },
       message: 'Loan submitted for owner approval. Schedule is created when owner approves on credit date.'
     });
   } catch (err) {
@@ -326,7 +373,7 @@ router.post('/:id/restructure', requireOwner, async (req: AuthRequest, res: Resp
       net_disbursement: calc.grossLoanAmount,
       interest_rate: body.new_interest_rate_per_period,
       interest_rate_per_period: body.new_interest_rate_per_period,
-      interest_type: body.repayment_frequency === 'daily' ? 'daily' : 'monthly',
+      interest_type: 'monthly',
       repayment_frequency: body.repayment_frequency,
       duration_months: Math.max(1, Math.ceil(calc.totalDurationDays / 30)),
       term_count: body.new_term_count,

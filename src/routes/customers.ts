@@ -100,6 +100,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 
 import multer from 'multer';
 import { uploadCustomerFile } from '../utils/storage';
+import { hasFace } from '../utils/faceDetection';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -125,6 +126,13 @@ router.post(
     // Validate that critical image files are provided in the upload
     if (!files?.photo?.[0] || !files?.nic_front?.[0] || !files?.nic_back?.[0]) {
       res.status(400).json({ error: 'Missing required profile or identification images. Face photo, NIC Front, and NIC Back are mandatory.' });
+      return;
+    }
+
+    // Validate that the photo contains at least one face
+    const containsFace = await hasFace(files.photo[0].buffer);
+    if (!containsFace) {
+      res.status(400).json({ error: 'Invalid profile photo. The uploaded image must contain at least one visible human face.' });
       return;
     }
 
