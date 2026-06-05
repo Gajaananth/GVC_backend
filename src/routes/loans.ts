@@ -6,9 +6,24 @@ import { calculateLoanProduct } from '../utils/loanCalculator';
 import { TERM_CONFIG } from '../utils/loanTermConfig';
 import { format } from 'date-fns';
 import { generateLoanApplicationPDF, uploadLoanFormPDF } from '../utils/pdfGenerator';
+import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
 
 const router = Router();
 router.use(authenticateJWT);
+
+const loanUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'));
+    }
+  }
+});
 
 const loanProductFields = {
   customer_id: z.string().uuid(),
@@ -174,9 +189,35 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // POST /api/loans
-router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const body = createLoanSchema.parse(req.body);
+    // Check for required PDF
+    if (!req.file) {
+      res.status(400).json({ error: 'Loan application PDF is required' });
+      return;
+    }
+
+    // Parse form fields (strings) to the correct types for Zod
+    const parsedBody = {
+      customer_id: req.body.customer_id,
+      gross_loan_amount: Number(req.body.gross_loan_amount),
+      insurance_fee_percent: req.body.insurance_fee_percent != null ? Number(req.body.insurance_fee_percent) : 0,
+      insurance_fee_amount: req.body.insurance_fee_amount != null ? Number(req.body.insurance_fee_amount) : 0,
+      documentation_fee: req.body.documentation_fee != null ? Number(req.body.documentation_fee) : 0,
+      interest_rate_per_period: Number(req.body.interest_rate_per_period),
+      term_count: Number(req.body.term_count),
+      repayment_frequency: req.body.repayment_frequency,
+      credit_date: req.body.credit_date,
+      applied_by: req.body.applied_by,
+      in_charge_user_id: req.body.in_charge_user_id,
+      purpose: req.body.purpose || null,
+      guarantor_name: req.body.guarantor_name || null,
+      guarantor_phone: req.body.guarantor_phone || null,
+      collateral_notes: req.body.collateral_notes || null,
+      notes: req.body.notes || null,
+    };
+
+    const body = createLoanSchema.parse(parsedBody);
 
     const { data: customer } = await supabase
       .from('customers')
@@ -265,7 +306,28 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // Fetch staff names for the PDF
+    // Upload user-provided loan application PDF
+    let loanApplicationUrl: string | null = null;
+    try {
+      const BUCKET = process.env.STORAGE_BUCKET || 'gvc-finance-files';
+      const ext = path.extname(req.file.originalname) || '.pdf';
+      const storagePath = `loans/${loan.id}/application/${uuidv4()}${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, req.file.buffer, {
+          contentType: 'application/pdf',
+          upsert: false
+        });
+      if (uploadErr) throw uploadErr;
+      const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+      loanApplicationUrl = publicData.publicUrl;
+      await supabase.from('loans').update({ loan_application_url: loanApplicationUrl }).eq('id', loan.id);
+    } catch (pdfUploadErr) {
+      console.error('Failed to upload loan application PDF:', pdfUploadErr);
+      // Non-blocking — loan is still created
+    }
+
+    // Fetch staff names for the auto-generated PDF
     const { data: appliedByUser } = await supabase.from('users').select('full_name').eq('id', body.applied_by).single();
     const { data: inChargeUser } = await supabase.from('users').select('full_name').eq('id', body.in_charge_user_id).single();
 
@@ -320,7 +382,7 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
     });
 
     res.status(201).json({
-      data: { ...loan, loan_form_url: loanFormUrl, preview: calc },
+      data: { ...loan, loan_form_url: loanFormUrl, loan_application_url: loanApplicationUrl, preview: calc },
       message: 'Loan submitted for owner approval. Schedule is created when owner approves on credit date.'
     });
   } catch (err) {

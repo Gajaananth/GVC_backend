@@ -36,32 +36,47 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.loadFaceDetectionModels = loadFaceDetectionModels;
 exports.hasFace = hasFace;
-const tf = __importStar(require("@tensorflow/tfjs"));
-const faceapi = __importStar(require("@vladmandic/face-api"));
 const path_1 = __importDefault(require("path"));
 const sharp_1 = __importDefault(require("sharp"));
-// Load models
-const MODEL_URL = path_1.default.join(__dirname, '../../node_modules/@vladmandic/face-api/model');
 let modelsLoaded = false;
+let initFailed = false;
+let faceapi = null;
+let tf = null;
+const MODEL_URL = path_1.default.join(__dirname, '../../node_modules/@vladmandic/face-api/model');
 async function loadFaceDetectionModels() {
     if (modelsLoaded)
-        return;
-    // Initialize tfjs
-    await tf.ready();
-    // Load the SSD Mobilenetv1 model for face detection
-    await faceapi.nets.ssdMobilenetv1.loadFromDisk(MODEL_URL);
-    modelsLoaded = true;
+        return true;
+    if (initFailed)
+        return false;
+    try {
+        tf = await Promise.resolve().then(() => __importStar(require('@tensorflow/tfjs')));
+        await tf.ready();
+        // Use ESM build — avoids hard dependency on @tensorflow/tfjs-node at startup
+        faceapi = await Promise.resolve().then(() => __importStar(require('@vladmandic/face-api/dist/face-api.esm.js')));
+        await faceapi.nets.ssdMobilenetv1.loadFromDisk(MODEL_URL);
+        modelsLoaded = true;
+        return true;
+    }
+    catch (error) {
+        initFailed = true;
+        console.warn('Face detection models unavailable (uploads will skip auto face check):', error instanceof Error ? error.message : error);
+        return false;
+    }
 }
+/**
+ * Returns true if a face is detected, or true when ML is unavailable (server still runs on Render).
+ */
 async function hasFace(imageBuffer) {
-    await loadFaceDetectionModels();
+    const ready = await loadFaceDetectionModels();
+    if (!ready || !faceapi || !tf) {
+        return true;
+    }
     try {
         const { data, info } = await (0, sharp_1.default)(imageBuffer)
-            .removeAlpha() // Ensure 3 channels (RGB)
+            .removeAlpha()
             .raw()
             .toBuffer({ resolveWithObject: true });
-        // Create tensor from raw pixels
         const tensor = tf.tensor3d(new Uint8Array(data), [info.height, info.width, 3], 'int32');
         try {
             const detections = await faceapi.detectAllFaces(tensor, new faceapi.SsdMobilenetv1Options());
@@ -73,7 +88,7 @@ async function hasFace(imageBuffer) {
     }
     catch (error) {
         console.error('Error during face detection:', error);
-        return false;
+        return true;
     }
 }
 //# sourceMappingURL=faceDetection.js.map

@@ -117,7 +117,12 @@ router.post(
     { name: 'nic_back', maxCount: 1 },
     { name: 'home_photo', maxCount: 1 },
     { name: 'shop_photo', maxCount: 1 },
-    { name: 'application_form', maxCount: 1 }
+    { name: 'application_form', maxCount: 1 },
+    { name: 'other_photo_1', maxCount: 1 },
+    { name: 'other_photo_2', maxCount: 1 },
+    { name: 'other_photo_3', maxCount: 1 },
+    { name: 'other_photo_4', maxCount: 1 },
+    { name: 'other_photo_5', maxCount: 1 }
   ]),
   async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -222,6 +227,22 @@ router.post(
         .single();
         
       if (updateError) throw updateError;
+
+      // Handle "other" photos
+      for (let i = 1; i <= 5; i++) {
+        const otherFile = files[`other_photo_${i}`]?.[0];
+        if (otherFile) {
+          const uploadRes = await uploadCustomerFile(customer.id, 'other', otherFile);
+          await supabase.from('customer_documents').insert({
+            customer_id: customer.id,
+            document_type: 'other',
+            file_url: uploadRes.url,
+            file_name: otherFile.originalname,
+            mime_type: otherFile.mimetype,
+            uploaded_by: req.user!.id
+          });
+        }
+      }
 
       await supabase.from('activity_logs').insert({
         user_id: req.user!.id, user_name: req.user!.full_name, user_role: req.user!.role,
