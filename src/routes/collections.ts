@@ -507,9 +507,9 @@ router.post('/corrections', requireStaff, async (req: AuthRequest, res: Response
 
 // GET /api/collections/corrections/pending — owner
 router.get('/corrections/pending', requireOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
-  const { data, error } = await supabase
+  const { data: requests, error } = await supabase
     .from('collection_correction_requests')
-    .select(`*, requester:users!requested_by(id, full_name)`)
+    .select('*')
     .eq('status', 'pending_owner')
     .order('created_at', { ascending: false });
 
@@ -517,6 +517,21 @@ router.get('/corrections/pending', requireOwner, async (_req: AuthRequest, res: 
     res.status(500).json({ error: error.message });
     return;
   }
+  
+  if (!requests || requests.length === 0) {
+    res.json({ data: [] });
+    return;
+  }
+
+  const userIds = [...new Set(requests.map(r => r.requested_by))];
+  const { data: users } = await supabase.from('users').select('id, full_name').in('id', userIds);
+  const userMap = new Map((users || []).map(u => [u.id, u]));
+
+  const data = requests.map(r => ({
+    ...r,
+    requester: userMap.get(r.requested_by) || null
+  }));
+
   res.json({ data });
 });
 
@@ -658,9 +673,9 @@ router.post('/corrections/:id/execute', requireAdminOrOwner, async (req: AuthReq
 
 // GET /api/collections/corrections/approved — admin/owner execute queue
 router.get('/corrections/approved', requireAdminOrOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
-  const { data, error } = await supabase
+  const { data: requests, error } = await supabase
     .from('collection_correction_requests')
-    .select(`*, requester:users!requested_by(id, full_name)`)
+    .select('*')
     .eq('status', 'approved')
     .order('owner_reviewed_at', { ascending: false });
 
@@ -668,6 +683,21 @@ router.get('/corrections/approved', requireAdminOrOwner, async (_req: AuthReques
     res.status(500).json({ error: error.message });
     return;
   }
+  
+  if (!requests || requests.length === 0) {
+    res.json({ data: [] });
+    return;
+  }
+
+  const userIds = [...new Set(requests.map(r => r.requested_by))];
+  const { data: users } = await supabase.from('users').select('id, full_name').in('id', userIds);
+  const userMap = new Map((users || []).map(u => [u.id, u]));
+
+  const data = requests.map(r => ({
+    ...r,
+    requester: userMap.get(r.requested_by) || null
+  }));
+
   res.json({ data });
 });
 
