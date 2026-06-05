@@ -108,7 +108,12 @@ router.post('/', auth_1.requireCustomerAdmin, upload.fields([
     { name: 'nic_back', maxCount: 1 },
     { name: 'home_photo', maxCount: 1 },
     { name: 'shop_photo', maxCount: 1 },
-    { name: 'application_form', maxCount: 1 }
+    { name: 'application_form', maxCount: 1 },
+    { name: 'other_photo_1', maxCount: 1 },
+    { name: 'other_photo_2', maxCount: 1 },
+    { name: 'other_photo_3', maxCount: 1 },
+    { name: 'other_photo_4', maxCount: 1 },
+    { name: 'other_photo_5', maxCount: 1 }
 ]), async (req, res) => {
     try {
         const files = req.files;
@@ -203,6 +208,21 @@ router.post('/', auth_1.requireCustomerAdmin, upload.fields([
                 .single();
             if (updateError)
                 throw updateError;
+            // Handle "other" photos
+            for (let i = 1; i <= 5; i++) {
+                const otherFile = files[`other_photo_${i}`]?.[0];
+                if (otherFile) {
+                    const uploadRes = await (0, storage_1.uploadCustomerFile)(customer.id, 'other', otherFile);
+                    await supabase_1.supabase.from('customer_documents').insert({
+                        customer_id: customer.id,
+                        document_type: 'other',
+                        file_url: uploadRes.url,
+                        file_name: otherFile.originalname,
+                        mime_type: otherFile.mimetype,
+                        uploaded_by: req.user.id
+                    });
+                }
+            }
             await supabase_1.supabase.from('activity_logs').insert({
                 user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
                 action: 'CREATE', entity_type: 'customer',

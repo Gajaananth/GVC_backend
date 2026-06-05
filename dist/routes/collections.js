@@ -221,13 +221,13 @@ router.get('/pending', auth_1.requireAdmin, async (req, res) => {
     const filterDate = date || today();
     let payQuery = supabase_1.supabase
         .from('loan_payments')
-        .select(`*, loans(loan_code), customers(full_name, customer_code), submitter:created_by(id, full_name)`)
+        .select(`*, loans(loan_code), customers(full_name, customer_code), submitter:users!created_by(id, full_name)`)
         .eq('approval_status', 'pending_admin')
         .eq('payment_date', filterDate)
         .order('created_at', { ascending: false });
     let savQuery = supabase_1.supabase
         .from('savings_transactions')
-        .select(`*, savings_accounts(account_code), customers(full_name), submitter:created_by(id, full_name)`)
+        .select(`*, savings_accounts(account_code), customers(full_name), submitter:users!created_by(id, full_name)`)
         .eq('approval_status', 'pending_admin')
         .eq('transaction_date', filterDate)
         .order('created_at', { ascending: false });
@@ -441,15 +441,26 @@ router.post('/corrections', requireStaff, async (req, res) => {
 });
 // GET /api/collections/corrections/pending — owner
 router.get('/corrections/pending', auth_1.requireOwner, async (_req, res) => {
-    const { data, error } = await supabase_1.supabase
+    const { data: requests, error } = await supabase_1.supabase
         .from('collection_correction_requests')
-        .select(`*, requester:requested_by(id, full_name)`)
+        .select('*')
         .eq('status', 'pending_owner')
         .order('created_at', { ascending: false });
     if (error) {
         res.status(500).json({ error: error.message });
         return;
     }
+    if (!requests || requests.length === 0) {
+        res.json({ data: [] });
+        return;
+    }
+    const userIds = [...new Set(requests.map(r => r.requested_by))];
+    const { data: users } = await supabase_1.supabase.from('users').select('id, full_name').in('id', userIds);
+    const userMap = new Map((users || []).map(u => [u.id, u]));
+    const data = requests.map(r => ({
+        ...r,
+        requester: userMap.get(r.requested_by) || null
+    }));
     res.json({ data });
 });
 // POST /api/collections/corrections/:id/approve — owner
@@ -585,15 +596,26 @@ router.post('/corrections/:id/execute', requireAdminOrOwner, async (req, res) =>
 });
 // GET /api/collections/corrections/approved — admin/owner execute queue
 router.get('/corrections/approved', requireAdminOrOwner, async (_req, res) => {
-    const { data, error } = await supabase_1.supabase
+    const { data: requests, error } = await supabase_1.supabase
         .from('collection_correction_requests')
-        .select(`*, requester:requested_by(id, full_name)`)
+        .select('*')
         .eq('status', 'approved')
         .order('owner_reviewed_at', { ascending: false });
     if (error) {
         res.status(500).json({ error: error.message });
         return;
     }
+    if (!requests || requests.length === 0) {
+        res.json({ data: [] });
+        return;
+    }
+    const userIds = [...new Set(requests.map(r => r.requested_by))];
+    const { data: users } = await supabase_1.supabase.from('users').select('id, full_name').in('id', userIds);
+    const userMap = new Map((users || []).map(u => [u.id, u]));
+    const data = requests.map(r => ({
+        ...r,
+        requester: userMap.get(r.requested_by) || null
+    }));
     res.json({ data });
 });
 // GET /api/collections/daily-dues — staff (or admin) collection list for a date

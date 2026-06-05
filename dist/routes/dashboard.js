@@ -143,7 +143,7 @@ router.get('/advanced-metrics', async (req, res) => {
         const startOfMonthStr = `${new Date().toISOString().slice(0, 7)}-01`;
         const { data: staffPayments } = await supabase_1.supabase
             .from('loan_payments')
-            .select('amount, submitter:created_by(id, full_name)')
+            .select('amount, submitter:users!created_by(id, full_name)')
             .gte('payment_date', startOfMonthStr)
             .eq('approval_status', 'approved');
         const staffMap = {};

@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const zod_1 = require("zod");
@@ -8,8 +11,23 @@ const loanCalculator_1 = require("../utils/loanCalculator");
 const loanTermConfig_1 = require("../utils/loanTermConfig");
 const date_fns_1 = require("date-fns");
 const pdfGenerator_1 = require("../utils/pdfGenerator");
+const multer_1 = __importDefault(require("multer"));
+const uuid_1 = require("uuid");
+const path_1 = __importDefault(require("path"));
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
+const loanUpload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        if (file.mimetype === 'application/pdf') {
+            cb(null, true);
+        }
+        else {
+            cb(new Error('Only PDF files are allowed'));
+        }
+    }
+});
 const loanProductFields = {
     customer_id: zod_1.z.string().uuid(),
     gross_loan_amount: zod_1.z.number().positive(),
@@ -155,7 +173,7 @@ router.get('/:id', async (req, res) => {
         .order('payment_date', { ascending: false });
     const { data: assignmentHistory } = await supabase_1.supabase
         .from('loan_assignment_changes')
-        .select('*, proposed:proposed_in_charge_id(full_name), requester:requested_by(full_name)')
+        .select('*, proposed:users!proposed_in_charge_id(full_name), requester:users!requested_by(full_name)')
         .eq('loan_id', req.params.id)
         .order('created_at', { ascending: false });
     res.json({
@@ -168,9 +186,33 @@ router.get('/:id', async (req, res) => {
     });
 });
 // POST /api/loans
-router.post('/', auth_1.requireAdmin, async (req, res) => {
+router.post('/', auth_1.requireAdmin, loanUpload.single('loan_application_pdf'), async (req, res) => {
     try {
-        const body = createLoanSchema.parse(req.body);
+        // Check for required PDF
+        if (!req.file) {
+            res.status(400).json({ error: 'Loan application PDF is required' });
+            return;
+        }
+        // Parse form fields (strings) to the correct types for Zod
+        const parsedBody = {
+            customer_id: req.body.customer_id,
+            gross_loan_amount: Number(req.body.gross_loan_amount),
+            insurance_fee_percent: req.body.insurance_fee_percent != null ? Number(req.body.insurance_fee_percent) : 0,
+            insurance_fee_amount: req.body.insurance_fee_amount != null ? Number(req.body.insurance_fee_amount) : 0,
+            documentation_fee: req.body.documentation_fee != null ? Number(req.body.documentation_fee) : 0,
+            interest_rate_per_period: Number(req.body.interest_rate_per_period),
+            term_count: Number(req.body.term_count),
+            repayment_frequency: req.body.repayment_frequency,
+            credit_date: req.body.credit_date,
+            applied_by: req.body.applied_by,
+            in_charge_user_id: req.body.in_charge_user_id,
+            purpose: req.body.purpose || null,
+            guarantor_name: req.body.guarantor_name || null,
+            guarantor_phone: req.body.guarantor_phone || null,
+            collateral_notes: req.body.collateral_notes || null,
+            notes: req.body.notes || null,
+        };
+        const body = createLoanSchema.parse(parsedBody);
         const { data: customer } = await supabase_1.supabase
             .from('customers')
             .select('id, full_name, is_active, assigned_staff_id, branch_id, customer_code, phone, nic_number, address')
@@ -250,7 +292,29 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             res.status(500).json({ error: loanError?.message || 'Failed to create loan' });
             return;
         }
-        // Fetch staff names for the PDF
+        // Upload user-provided loan application PDF
+        let loanApplicationUrl = null;
+        try {
+            const BUCKET = process.env.STORAGE_BUCKET || 'gvc-finance-files';
+            const ext = path_1.default.extname(req.file.originalname) || '.pdf';
+            const storagePath = `loans/${loan.id}/application/${(0, uuid_1.v4)()}${ext}`;
+            const { error: uploadErr } = await supabase_1.supabase.storage
+                .from(BUCKET)
+                .upload(storagePath, req.file.buffer, {
+                contentType: 'application/pdf',
+                upsert: false
+            });
+            if (uploadErr)
+                throw uploadErr;
+            const { data: publicData } = supabase_1.supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+            loanApplicationUrl = publicData.publicUrl;
+            await supabase_1.supabase.from('loans').update({ loan_application_url: loanApplicationUrl }).eq('id', loan.id);
+        }
+        catch (pdfUploadErr) {
+            console.error('Failed to upload loan application PDF:', pdfUploadErr);
+            // Non-blocking — loan is still created
+        }
+        // Fetch staff names for the auto-generated PDF
         const { data: appliedByUser } = await supabase_1.supabase.from('users').select('full_name').eq('id', body.applied_by).single();
         const { data: inChargeUser } = await supabase_1.supabase.from('users').select('full_name').eq('id', body.in_charge_user_id).single();
         // Generate Loan Application PDF and upload to Supabase
@@ -301,7 +365,7 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             description: `Submitted ${body.repayment_frequency} loan ${loan.loan_code} — gross ₨${calc.grossLoanAmount.toLocaleString()}, net disbursement ₨${calc.netDisbursement.toLocaleString()}`
         });
         res.status(201).json({
-            data: { ...loan, loan_form_url: loanFormUrl, preview: calc },
+            data: { ...loan, loan_form_url: loanFormUrl, loan_application_url: loanApplicationUrl, preview: calc },
             message: 'Loan submitted for owner approval. Schedule is created when owner approves on credit date.'
         });
     }
