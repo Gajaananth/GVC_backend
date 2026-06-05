@@ -176,8 +176,8 @@ router.get('/assignments/pending', requireOwner, async (_req: AuthRequest, res: 
       *,
       loans(id, loan_code, customer_id, customers(full_name, customer_code)),
       previous:previous_in_charge_id(id, full_name),
-      proposed:proposed_in_charge_id(id, full_name),
-      requester:requested_by(id, full_name)
+      proposed:users!proposed_in_charge_id(id, full_name),
+      requester:users!requested_by(id, full_name)
     `)
     .eq('status', 'pending_owner')
     .order('created_at', { ascending: false });

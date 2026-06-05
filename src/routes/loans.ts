@@ -174,7 +174,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 
   const { data: assignmentHistory } = await supabase
     .from('loan_assignment_changes')
-    .select('*, proposed:proposed_in_charge_id(full_name), requester:requested_by(full_name)')
+    .select('*, proposed:users!proposed_in_charge_id(full_name), requester:users!requested_by(full_name)')
     .eq('loan_id', req.params.id)
     .order('created_at', { ascending: false });
 

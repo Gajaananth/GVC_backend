@@ -252,14 +252,14 @@ router.get('/pending', requireAdmin, async (req: AuthRequest, res: Response): Pr
 
   let payQuery = supabase
     .from('loan_payments')
-    .select(`*, loans(loan_code), customers(full_name, customer_code), submitter:created_by(id, full_name)`)
+    .select(`*, loans(loan_code), customers(full_name, customer_code), submitter:users!created_by(id, full_name)`)
     .eq('approval_status', 'pending_admin')
     .eq('payment_date', filterDate)
     .order('created_at', { ascending: false });
 
   let savQuery = supabase
     .from('savings_transactions')
-    .select(`*, savings_accounts(account_code), customers(full_name), submitter:created_by(id, full_name)`)
+    .select(`*, savings_accounts(account_code), customers(full_name), submitter:users!created_by(id, full_name)`)
     .eq('approval_status', 'pending_admin')
     .eq('transaction_date', filterDate)
     .order('created_at', { ascending: false });
@@ -509,7 +509,7 @@ router.post('/corrections', requireStaff, async (req: AuthRequest, res: Response
 router.get('/corrections/pending', requireOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
   const { data, error } = await supabase
     .from('collection_correction_requests')
-    .select(`*, requester:requested_by(id, full_name)`)
+    .select(`*, requester:users!requested_by(id, full_name)`)
     .eq('status', 'pending_owner')
     .order('created_at', { ascending: false });
 
@@ -660,7 +660,7 @@ router.post('/corrections/:id/execute', requireAdminOrOwner, async (req: AuthReq
 router.get('/corrections/approved', requireAdminOrOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
   const { data, error } = await supabase
     .from('collection_correction_requests')
-    .select(`*, requester:requested_by(id, full_name)`)
+    .select(`*, requester:users!requested_by(id, full_name)`)
     .eq('status', 'approved')
     .order('owner_reviewed_at', { ascending: false });
 
