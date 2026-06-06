@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/supabase';
 import { authenticateJWT, requireAdmin, requireRole, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -88,7 +89,13 @@ router.get('/pending', requireAdmin, async (req: AuthRequest, res: Response): Pr
   const { data, error } = await pendingQuery.order('created_at', { ascending: false });
 
   if (error) {
-    res.status(500).json({ error: error.message });
+    logger.error('Supabase error on forms/pending:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to load pending physical forms',
+      code: error.code,
+      details: error.details,
+      hint: error.hint
+    });
     return;
   }
   res.json({ data });
