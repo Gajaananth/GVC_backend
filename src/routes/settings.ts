@@ -12,12 +12,10 @@ router.get('/', requireOwner, async (_req: AuthRequest, res: Response): Promise<
   const { data, error } = await supabase
     .from('company_settings')
     .select('*')
-    .limit(1)
-    .single();
+    .limit(1);
 
   if (error) {
     logger.error('Supabase error on settings GET:', error);
-    // Detect Postgres permission denied (commonly SQLSTATE 42501) and return actionable message
     const isPermissionDenied = error.code === '42501' || (typeof error.message === 'string' && error.message.toLowerCase().includes('permission denied'));
     if (isPermissionDenied) {
       res.status(500).json({
@@ -35,7 +33,14 @@ router.get('/', requireOwner, async (_req: AuthRequest, res: Response): Promise<
     });
     return;
   }
-  res.json({ data });
+
+  const settings = Array.isArray(data) ? data[0] : data;
+  if (!settings) {
+    res.status(404).json({ error: 'Settings not found' });
+    return;
+  }
+
+  res.json({ data: settings });
 });
 
 const settingsSchema = z.object({
@@ -56,12 +61,14 @@ const settingsSchema = z.object({
 router.put('/', requireOwner, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = settingsSchema.parse(req.body);
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
     const { data, error } = await supabase
       .from('company_settings')
-      .update({ ...body, updated_by: req.user!.id })
+      .update({ ...body, updated_by: user.id })
       .neq('id', '00000000-0000-0000-0000-000000000000') // update all rows
-      .select()
-      .single();
+      .select();
 
     if (error) {
       const isPermissionDenied = error.code === '42501' || (typeof error.message === 'string' && error.message.toLowerCase().includes('permission denied'));
@@ -74,7 +81,11 @@ router.put('/', requireOwner, async (req: AuthRequest, res: Response): Promise<v
       res.status(500).json({ error: error.message });
       return;
     }
-    res.json({ data, message: 'Settings updated successfully' });
+
+    const updatedSettings = Array.isArray(data) ? data[0] : data;
+    if (!updatedSettings) { res.status(404).json({ error: 'Settings not found' }); return; }
+
+    res.json({ data: updatedSettings, message: 'Settings updated successfully' });
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
     res.status(500).json({ error: 'Failed to update settings' });

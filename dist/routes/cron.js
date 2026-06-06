@@ -43,7 +43,13 @@ router.post('/nightly', async (_req, res) => {
             logger_1.logger.info(`Marked ${loanIds.length} loans as overdue.`);
         }
         // 3. Apply late fees on overdue installments that have passed the grace period
-        const { data: settings } = await supabase_1.supabase.from('company_settings').select('late_fee_percentage, grace_period_days').single();
+        const { data: settingsData, error: settingsError } = await supabase_1.supabase
+            .from('company_settings')
+            .select('late_fee_percentage, grace_period_days')
+            .limit(1);
+        if (settingsError)
+            throw settingsError;
+        const settings = Array.isArray(settingsData) ? settingsData[0] : settingsData;
         const lateFeePct = Number(settings?.late_fee_percentage || 2.0);
         const graceDays = Number(settings?.grace_period_days || 3);
         // Find installments that are overdue and passed the grace period

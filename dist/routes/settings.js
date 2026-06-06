@@ -12,10 +12,17 @@ router.get('/', auth_1.requireOwner, async (_req, res) => {
     const { data, error } = await supabase_1.supabase
         .from('company_settings')
         .select('*')
-        .limit(1)
-        .single();
+        .limit(1);
     if (error) {
         logger_1.logger.error('Supabase error on settings GET:', error);
+        const isPermissionDenied = error.code === '42501' || (typeof error.message === 'string' && error.message.toLowerCase().includes('permission denied'));
+        if (isPermissionDenied) {
+            res.status(500).json({
+                error: 'Database permission denied for `service_role` on table `company_settings`. Apply the required GRANTs as described in the migration README.',
+                action: 'Run the SQL from database/README_MIGRATION.md: GRANT USAGE ON SCHEMA public TO service_role; GRANT SELECT ON public.company_settings TO service_role;'
+            });
+            return;
+        }
         res.status(500).json({
             error: error.message || 'Failed to load settings',
             code: error.code,
@@ -24,7 +31,12 @@ router.get('/', auth_1.requireOwner, async (_req, res) => {
         });
         return;
     }
-    res.json({ data });
+    const settings = Array.isArray(data) ? data[0] : data;
+    if (!settings) {
+        res.status(404).json({ error: 'Settings not found' });
+        return;
+    }
+    res.json({ data: settings });
 });
 const settingsSchema = zod_1.z.object({
     company_name: zod_1.z.string().optional(),
@@ -43,17 +55,33 @@ const settingsSchema = zod_1.z.object({
 router.put('/', auth_1.requireOwner, async (req, res) => {
     try {
         const body = settingsSchema.parse(req.body);
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const { data, error } = await supabase_1.supabase
             .from('company_settings')
-            .update({ ...body, updated_by: req.user.id })
+            .update({ ...body, updated_by: user.id })
             .neq('id', '00000000-0000-0000-0000-000000000000') // update all rows
-            .select()
-            .single();
+            .select();
         if (error) {
+            const isPermissionDenied = error.code === '42501' || (typeof error.message === 'string' && error.message.toLowerCase().includes('permission denied'));
+            if (isPermissionDenied) {
+                res.status(500).json({
+                    error: 'Database permission denied for `service_role` on table `company_settings`. Apply the required GRANTs as described in the migration README.'
+                });
+                return;
+            }
             res.status(500).json({ error: error.message });
             return;
         }
-        res.json({ data, message: 'Settings updated successfully' });
+        const updatedSettings = Array.isArray(data) ? data[0] : data;
+        if (!updatedSettings) {
+            res.status(404).json({ error: 'Settings not found' });
+            return;
+        }
+        res.json({ data: updatedSettings, message: 'Settings updated successfully' });
     }
     catch (err) {
         if (err instanceof zod_1.z.ZodError) {

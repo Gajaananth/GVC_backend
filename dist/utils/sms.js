@@ -9,11 +9,11 @@ const supabase_1 = require("../config/supabase");
 const sendSMS = async (to, message) => {
     try {
         // Check if SMS is globally enabled in company_settings
-        const { data: settings } = await supabase_1.supabase
+        const { data: settingsData } = await supabase_1.supabase
             .from('company_settings')
             .select('sms_enabled')
-            .limit(1)
-            .single();
+            .limit(1);
+        const settings = Array.isArray(settingsData) ? settingsData[0] : settingsData;
         if (!settings?.sms_enabled) {
             logger_1.logger.info('SMS sending is disabled in company settings.');
             return false;

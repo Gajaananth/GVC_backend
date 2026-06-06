@@ -7,12 +7,12 @@ import { supabase } from '../config/supabase';
 export const sendSMS = async (to: string, message: string): Promise<boolean> => {
   try {
     // Check if SMS is globally enabled in company_settings
-    const { data: settings } = await supabase
+    const { data: settingsData } = await supabase
       .from('company_settings')
       .select('sms_enabled')
-      .limit(1)
-      .single();
+      .limit(1);
 
+    const settings = Array.isArray(settingsData) ? settingsData[0] : settingsData;
     if (!settings?.sms_enabled) {
       logger.info('SMS sending is disabled in company settings.');
       return false;

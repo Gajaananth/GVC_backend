@@ -12,8 +12,16 @@ const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 // Helper function to fetch company settings
 const getCompanySettings = async () => {
-    const { data } = await supabase_1.supabase.from('company_settings').select('*').limit(1).single();
-    return data || {
+    const { data, error } = await supabase_1.supabase.from('company_settings').select('*').limit(1);
+    if (error) {
+        return {
+            company_name: 'GVC Agro Finance',
+            company_address: '123 Main Road, Town, Sri Lanka',
+            company_phone: '011-1234567',
+            company_email: 'info@gvcagro.lk'
+        };
+    }
+    return (Array.isArray(data) ? data[0] : data) || {
         company_name: 'GVC Agro Finance',
         company_address: '123 Main Road, Town, Sri Lanka',
         company_phone: '011-1234567',
