@@ -705,7 +705,12 @@ router.get('/corrections/approved', requireAdmin, async (_req: AuthRequest, res:
         SUPABASE_URL: !!process.env.SUPABASE_URL,
         SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY
       });
-      res.status(500).json({ error: error.message || 'Supabase query failed', debug: 'check server logs for Supabase error details' });
+      res.status(500).json({
+        error: error.message || 'Supabase query failed',
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      });
       return;
     }
 
