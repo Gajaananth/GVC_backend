@@ -31,6 +31,8 @@ const addHeader = (doc: PDFKit.PDFDocument, title: string, settings: any) => {
 // GET /api/documents/receipt/:payment_id
 router.get('/receipt/:payment_id', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
     const { data: payment } = await supabase
       .from('loan_payments')
       .select('*, loans(loan_code), customers(full_name, nic_number, customer_code)')
@@ -43,7 +45,7 @@ router.get('/receipt/:payment_id', async (req: AuthRequest, res: Response): Prom
     }
 
     // Branch isolation
-    if (req.user?.role !== 'owner' && payment.branch_id !== req.user.branch_id) {
+    if (user.role !== 'owner' && payment.branch_id !== user.branch_id) {
       res.status(403).json({ error: 'Access to payment denied for your branch' });
       return;
     }
@@ -116,6 +118,8 @@ router.get('/receipt/:payment_id', async (req: AuthRequest, res: Response): Prom
 // GET /api/documents/statement/:customer_id
 router.get('/statement/:customer_id', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
     const { data: customer } = await supabase
       .from('customers')
       .select('*')
@@ -128,7 +132,7 @@ router.get('/statement/:customer_id', async (req: AuthRequest, res: Response): P
     }
 
     // Branch isolation
-    if (req.user?.role !== 'owner' && customer.branch_id !== req.user.branch_id) {
+    if (user.role !== 'owner' && customer.branch_id !== user.branch_id) {
       res.status(403).json({ error: 'Access to customer denied for your branch' });
       return;
     }
@@ -210,6 +214,8 @@ router.get('/statement/:customer_id', async (req: AuthRequest, res: Response): P
 // GET /api/documents/loan-certificate/:loan_id
 router.get('/loan-certificate/:loan_id', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
     const { data: loan } = await supabase
       .from('loans')
       .select('*, customers(full_name, nic_number, customer_code)')
@@ -222,7 +228,7 @@ router.get('/loan-certificate/:loan_id', async (req: AuthRequest, res: Response)
     }
 
     // Branch isolation
-    if (req.user?.role !== 'owner' && loan.branch_id !== req.user.branch_id) {
+    if (user.role !== 'owner' && loan.branch_id !== user.branch_id) {
       res.status(403).json({ error: 'Access to loan denied for your branch' });
       return;
     }

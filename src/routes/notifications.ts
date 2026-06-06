@@ -15,6 +15,8 @@ const smsSchema = z.object({
 // POST /api/notifications/send-sms
 router.post('/send-sms', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
     const { customer_id, message } = smsSchema.parse(req.body);
 
     const { data: customer } = await supabase
@@ -29,7 +31,7 @@ router.post('/send-sms', requireAdmin, async (req: AuthRequest, res: Response): 
     }
 
     // Branch isolation
-    if (req.user?.role !== 'owner' && (customer as any).branch_id !== req.user.branch_id) {
+    if (user.role !== 'owner' && (customer as any).branch_id !== user.branch_id) {
       res.status(403).json({ error: 'Access to customer denied for your branch' });
       return;
     }
@@ -67,27 +69,24 @@ router.post('/send-sms', requireAdmin, async (req: AuthRequest, res: Response): 
 
 // GET /api/notifications/history
 router.get('/history', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { data, error } = await supabase
-    .from('due_reminders')
-    .select('*, customers(full_name, phone)')
-    .order('created_at', { ascending: false })
-    .limit(100);
-
-  // Branch filtering
-  if (req.user?.role !== 'owner') {
-    // filter by joined customers.branch_id
-    // Supabase allows filtering on foreign tables using the relationship alias
-    // so we add an additional eq on customers.branch_id
+  // Use local user for branch filtering
+  if (user.role !== 'owner') {
     const resp = await supabase
       .from('due_reminders')
       .select('*, customers(full_name, phone)')
       .order('created_at', { ascending: false })
-      .eq('customers.branch_id', req.user.branch_id)
+      .eq('customers.branch_id', user.branch_id)
       .limit(100);
     if (resp.error) { res.status(500).json({ error: 'Failed to fetch notification history' }); return; }
     res.json({ data: resp.data });
     return;
   }
+
+  const { data, error } = await supabase
+    .from('due_reminders')
+    .select('*, customers(full_name, phone)')
+    .order('created_at', { ascending: false })
+    .limit(100);
 
   if (error) {
     res.status(500).json({ error: 'Failed to fetch notification history' });

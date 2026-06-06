@@ -28,6 +28,9 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   const limitNum = parseInt(limit as string, 10);
   const offset = (pageNum - 1) * limitNum;
 
+  const user = req.user;
+  if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
   let query = supabase
     .from('loan_payments')
     .select(`*, loans(loan_code), customers(full_name, customer_code)`, { count: 'exact' })
@@ -41,10 +44,10 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   if (approval_status) query = query.eq('approval_status', approval_status);
 
   // Scope results by branch/staff
-  if (req.user?.role === 'staff') {
-    query = query.eq('created_by', req.user.id);
-  } else if (req.user?.role !== 'owner') {
-    query = query.eq('branch_id', req.user.branch_id);
+  if (user.role === 'staff') {
+    query = query.eq('created_by', user.id);
+  } else if (user.role !== 'owner') {
+    query = query.eq('branch_id', user.branch_id);
   }
 
   const { data, error, count } = await query;
@@ -140,12 +143,12 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 
   if (error || !data) { res.status(404).json({ error: 'Payment not found' }); return; }
   // Branch isolation
-  if (req.user?.role !== 'owner' && data.branch_id !== req.user.branch_id) {
+  if (user.role !== 'owner' && data.branch_id !== user.branch_id) {
     res.status(403).json({ error: 'Access to payment denied for your branch' });
     return;
   }
   // Staff can only access payments they created
-  if (req.user?.role === 'staff' && data.created_by !== req.user.id) {
+  if (user.role === 'staff' && data.created_by !== user.id) {
     res.status(403).json({ error: 'Access to payment denied' });
     return;
   }

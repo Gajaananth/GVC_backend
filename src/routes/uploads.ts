@@ -24,7 +24,9 @@ router.post(
   upload.single('file'),
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-      const documentType = docTypeSchema.parse(req.body.document_type);
+        const user = req.user;
+        if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+        const documentType = docTypeSchema.parse(req.body.document_type);
       const file = req.file;
 
       if (!file) {
@@ -34,7 +36,7 @@ router.post(
 
       const { data: customer } = await supabase
         .from('customers')
-        .select('id, customer_code, full_name')
+        .select('id, customer_code, full_name, branch_id')
         .eq('id', req.params.customerId)
         .single();
 
@@ -44,7 +46,7 @@ router.post(
       }
 
       // Branch isolation
-      if (req.user?.role !== 'owner' && (customer as any).branch_id !== req.user.branch_id) {
+      if (user.role !== 'owner' && (customer as any).branch_id !== user.branch_id) {
         res.status(403).json({ error: 'Cannot upload documents for customers outside your branch' });
         return;
       }
@@ -62,13 +64,13 @@ router.post(
 
       const field = DOCUMENT_FIELD_MAP[documentType];
       if (field) {
-        await supabase.from('customers').update({ [field]: url, updated_by: req.user!.id }).eq('id', customer.id);
+        await supabase.from('customers').update({ [field]: url, updated_by: user.id }).eq('id', customer.id);
       }
 
       await supabase.from('activity_logs').insert({
-        user_id: req.user!.id,
-        user_name: req.user!.full_name,
-        user_role: req.user!.role,
+        user_id: user.id,
+        user_name: user.full_name,
+        user_role: user.role,
         action: 'UPLOAD',
         entity_type: 'customer_document',
         entity_id: customer.id,

@@ -7,6 +7,9 @@ router.use(authenticateJWT);
 
 // GET /api/dashboard/summary
 router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> => {
+  const user = req.user;
+  if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
   const { data, error } = await supabase
     .from('v_dashboard_summary')
     .select('*')
@@ -18,42 +21,42 @@ router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> =>
     .from('loans')
     .select('*', { count: 'exact', head: true })
     .eq('approval_status', 'pending_approval');
-  if (req.user?.role !== 'owner') pendingLoansQuery = pendingLoansQuery.eq('branch_id', req.user.branch_id);
+  if (user.role !== 'owner') pendingLoansQuery = pendingLoansQuery.eq('branch_id', user.branch_id);
   const { count: pendingLoans } = await pendingLoansQuery;
 
   let pendingAssignmentsQuery = supabase
     .from('loan_assignment_changes')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'pending_owner');
-  if (req.user?.role !== 'owner') pendingAssignmentsQuery = pendingAssignmentsQuery.eq('branch_id', req.user.branch_id);
+  if (user.role !== 'owner') pendingAssignmentsQuery = pendingAssignmentsQuery.eq('branch_id', user.branch_id);
   const { count: pendingAssignments } = await pendingAssignmentsQuery;
 
   let pendingCollectionsQuery = supabase
     .from('loan_payments')
     .select('*', { count: 'exact', head: true })
     .eq('approval_status', 'pending_admin');
-  if (req.user?.role !== 'owner') pendingCollectionsQuery = pendingCollectionsQuery.eq('branch_id', req.user.branch_id);
+  if (user.role !== 'owner') pendingCollectionsQuery = pendingCollectionsQuery.eq('branch_id', user.branch_id);
   const { count: pendingCollections } = await pendingCollectionsQuery;
 
   let pendingSavingsQuery = supabase
     .from('savings_transactions')
     .select('*', { count: 'exact', head: true })
     .eq('approval_status', 'pending_admin');
-  if (req.user?.role !== 'owner') pendingSavingsQuery = pendingSavingsQuery.eq('branch_id', req.user.branch_id);
+  if (user.role !== 'owner') pendingSavingsQuery = pendingSavingsQuery.eq('branch_id', user.branch_id);
   const { count: pendingSavings } = await pendingSavingsQuery;
 
   let pendingCorrectionsQuery = supabase
     .from('collection_correction_requests')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'pending_owner');
-  if (req.user?.role !== 'owner') pendingCorrectionsQuery = pendingCorrectionsQuery.eq('branch_id', req.user.branch_id);
+  if (user.role !== 'owner') pendingCorrectionsQuery = pendingCorrectionsQuery.eq('branch_id', user.branch_id);
   const { count: pendingCorrections } = await pendingCorrectionsQuery;
 
   let pendingPhysicalFormsQuery = supabase
     .from('physical_form_submissions')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'pending_admin');
-  if (req.user?.role !== 'owner') pendingPhysicalFormsQuery = pendingPhysicalFormsQuery.eq('branch_id', req.user.branch_id);
+  if (user.role !== 'owner') pendingPhysicalFormsQuery = pendingPhysicalFormsQuery.eq('branch_id', user.branch_id);
   const { count: pendingPhysicalForms } = await pendingPhysicalFormsQuery;
 
   res.json({

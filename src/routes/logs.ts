@@ -13,6 +13,9 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   const limitNum = parseInt(limit as string, 10);
   const offset = (pageNum - 1) * limitNum;
 
+  const user = req.user;
+  if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
   let query = supabase
     .from('activity_logs')
     .select('*', { count: 'exact' })
@@ -26,8 +29,8 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   if (end_date) query = query.lte('created_at', `${end_date}T23:59:59`);
 
   // Branch scoping for non-owner admins
-  if (req.user?.role !== 'owner') {
-    query = query.eq('branch_id', req.user.branch_id);
+  if (user.role !== 'owner') {
+    query = query.eq('branch_id', user.branch_id);
   }
 
   const { data, error, count } = await query;
