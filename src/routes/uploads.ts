@@ -43,6 +43,12 @@ router.post(
         return;
       }
 
+      // Branch isolation
+      if (req.user?.role !== 'owner' && (customer as any).branch_id !== req.user.branch_id) {
+        res.status(403).json({ error: 'Cannot upload documents for customers outside your branch' });
+        return;
+      }
+
       const { url } = await uploadCustomerFile(customer.id, documentType, file);
 
       await supabase.from('customer_documents').insert({

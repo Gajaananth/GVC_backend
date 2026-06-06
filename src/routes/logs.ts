@@ -25,6 +25,11 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   if (start_date) query = query.gte('created_at', start_date);
   if (end_date) query = query.lte('created_at', `${end_date}T23:59:59`);
 
+  // Branch scoping for non-owner admins
+  if (req.user?.role !== 'owner') {
+    query = query.eq('branch_id', req.user.branch_id);
+  }
+
   const { data, error, count } = await query;
   if (error) { res.status(500).json({ error: error.message }); return; }
   res.json({ data, total: count, page: pageNum, limit: limitNum, totalPages: Math.ceil((count || 0) / limitNum) });

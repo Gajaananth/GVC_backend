@@ -109,17 +109,33 @@ async function isReconciliationBalanced(staffId: string, date: string): Promise<
 router.post('/submit/payment', requireStaff, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = staffPaymentSchema.parse(req.body);
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
     const paymentDate = today();
 
     const { data: loan } = await supabase
       .from('loans')
-      .select('id, loan_code, customer_id, remaining_balance, approval_status, is_fully_paid, status')
+      .select('id, loan_code, customer_id, remaining_balance, approval_status, is_fully_paid, status, in_charge_user_id, branch_id')
       .eq('id', body.loan_id)
       .single();
 
     if (!loan || loan.approval_status !== 'approved' || loan.is_fully_paid) {
       res.status(400).json({ error: 'Loan not available for collection' });
       return;
+    }
+    // Branch isolation
+    if (user.role !== 'owner' && loan.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Loan not available for your branch' });
+      return;
+    }
+    // Staff may only collect for loans they are in charge of or for customers assigned to them
+    if (user.role === 'staff') {
+      const { data: customer } = await supabase.from('customers').select('assigned_staff_id').eq('id', loan.customer_id).single();
+      const assigned = customer?.assigned_staff_id;
+      if (loan.in_charge_user_id !== user.id && assigned !== user.id) {
+        res.status(403).json({ error: 'Staff not authorized to collect for this loan' });
+        return;
+      }
     }
     if (body.amount > Number(loan.remaining_balance) + 1) {
       res.status(400).json({ error: 'Amount exceeds remaining balance' });
@@ -131,6 +147,7 @@ router.post('/submit/payment', requireStaff, async (req: AuthRequest, res: Respo
       .insert({
         loan_id: body.loan_id,
         customer_id: loan.customer_id,
+        branch_id: req.user!.branch_id,
         payment_date: paymentDate,
         amount: body.amount,
         cash_amount: body.cash_amount,
@@ -699,7 +716,20 @@ router.get('/corrections/approved', requireAdmin, async (_req: AuthRequest, res:
       JWT_SECRET: !!process.env.JWT_SECRET
     });
 
-    const { data: requests, error } = await fetchApprovedCorrectionRequests();
+    // Apply branch scoping for non-owner admins
+    const branchId = (_req.user?.role !== 'owner') ? _req.user?.branch_id : undefined;
+    let result;
+    if (branchId) {
+      result = await supabase
+        .from('collection_correction_requests')
+        .select('*')
+        .eq('status', 'approved')
+        .eq('branch_id', branchId)
+        .order('owner_reviewed_at', { ascending: false });
+    } else {
+      result = await fetchApprovedCorrectionRequests();
+    }
+    const { data: requests, error } = result;
     if (error) {
       console.error('Supabase error on corrections/approved:', error, {
         SUPABASE_URL: !!process.env.SUPABASE_URL,

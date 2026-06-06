@@ -23,6 +23,27 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       .select('id, full_name, nic_number, customer_code, phone, photo_url')
       .or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%"`)
       .limit(5);
+    // Branch / staff scoping
+    if (req.user?.role === 'staff') {
+      // staff only see assigned customers
+      // re-run with assigned_staff_id filter
+      const { data: staffCustomers } = await supabase
+        .from('customers')
+        .select('id, full_name, nic_number, customer_code, phone, photo_url')
+        .or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%"`)
+        .eq('assigned_staff_id', req.user.id)
+        .limit(5);
+      customers = staffCustomers;
+    } else if (req.user?.role !== 'owner') {
+      // branch-restricted search
+      const { data: branchCustomers } = await supabase
+        .from('customers')
+        .select('id, full_name, nic_number, customer_code, phone, photo_url')
+        .or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%"`)
+        .eq('branch_id', req.user.branch_id)
+        .limit(5);
+      customers = branchCustomers;
+    }
 
     // Search Loans
     const { data: loans } = await supabase
@@ -30,6 +51,15 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       .select('id, loan_code, status, customers(full_name)')
       .ilike('loan_code', searchQuery)
       .limit(5);
+    if (req.user?.role !== 'owner') {
+      const { data: branchLoans } = await supabase
+        .from('loans')
+        .select('id, loan_code, status, customers(full_name)')
+        .ilike('loan_code', searchQuery)
+        .eq('branch_id', req.user.branch_id)
+        .limit(5);
+      loans = branchLoans;
+    }
 
     const results = [
       ...(customers || []).map(c => ({

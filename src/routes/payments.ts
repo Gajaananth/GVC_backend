@@ -40,6 +40,13 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   if (end_date) query = query.lte('payment_date', end_date);
   if (approval_status) query = query.eq('approval_status', approval_status);
 
+  // Scope results by branch/staff
+  if (req.user?.role === 'staff') {
+    query = query.eq('created_by', req.user.id);
+  } else if (req.user?.role !== 'owner') {
+    query = query.eq('branch_id', req.user.branch_id);
+  }
+
   const { data, error, count } = await query;
   if (error) { res.status(500).json({ error: error.message }); return; }
   res.json({ data, total: count, page: pageNum, limit: limitNum, totalPages: Math.ceil((count || 0) / limitNum) });
@@ -132,6 +139,16 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     .single();
 
   if (error || !data) { res.status(404).json({ error: 'Payment not found' }); return; }
+  // Branch isolation
+  if (req.user?.role !== 'owner' && data.branch_id !== req.user.branch_id) {
+    res.status(403).json({ error: 'Access to payment denied for your branch' });
+    return;
+  }
+  // Staff can only access payments they created
+  if (req.user?.role === 'staff' && data.created_by !== req.user.id) {
+    res.status(403).json({ error: 'Access to payment denied' });
+    return;
+  }
   res.json({ data });
 });
 

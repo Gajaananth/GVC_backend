@@ -28,6 +28,12 @@ router.post('/send-sms', requireAdmin, async (req: AuthRequest, res: Response): 
       return;
     }
 
+    // Branch isolation
+    if (req.user?.role !== 'owner' && (customer as any).branch_id !== req.user.branch_id) {
+      res.status(403).json({ error: 'Access to customer denied for your branch' });
+      return;
+    }
+
     // Call the sms utility
     await sendSMS(customer.phone, message);
 
@@ -66,6 +72,22 @@ router.get('/history', requireAdmin, async (req: AuthRequest, res: Response): Pr
     .select('*, customers(full_name, phone)')
     .order('created_at', { ascending: false })
     .limit(100);
+
+  // Branch filtering
+  if (req.user?.role !== 'owner') {
+    // filter by joined customers.branch_id
+    // Supabase allows filtering on foreign tables using the relationship alias
+    // so we add an additional eq on customers.branch_id
+    const resp = await supabase
+      .from('due_reminders')
+      .select('*, customers(full_name, phone)')
+      .order('created_at', { ascending: false })
+      .eq('customers.branch_id', req.user.branch_id)
+      .limit(100);
+    if (resp.error) { res.status(500).json({ error: 'Failed to fetch notification history' }); return; }
+    res.json({ data: resp.data });
+    return;
+  }
 
   if (error) {
     res.status(500).json({ error: 'Failed to fetch notification history' });

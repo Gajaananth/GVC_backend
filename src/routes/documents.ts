@@ -42,6 +42,12 @@ router.get('/receipt/:payment_id', async (req: AuthRequest, res: Response): Prom
       return;
     }
 
+    // Branch isolation
+    if (req.user?.role !== 'owner' && payment.branch_id !== req.user.branch_id) {
+      res.status(403).json({ error: 'Access to payment denied for your branch' });
+      return;
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=receipt-${payment.payment_code}.pdf`);
 
@@ -118,6 +124,12 @@ router.get('/statement/:customer_id', async (req: AuthRequest, res: Response): P
 
     if (!customer) {
       res.status(404).json({ error: 'Customer not found' });
+      return;
+    }
+
+    // Branch isolation
+    if (req.user?.role !== 'owner' && customer.branch_id !== req.user.branch_id) {
+      res.status(403).json({ error: 'Access to customer denied for your branch' });
       return;
     }
 
@@ -206,6 +218,12 @@ router.get('/loan-certificate/:loan_id', async (req: AuthRequest, res: Response)
 
     if (!loan || loan.status !== 'closed' || !loan.is_fully_paid) {
       res.status(400).json({ error: 'Loan is not fully settled' });
+      return;
+    }
+
+    // Branch isolation
+    if (req.user?.role !== 'owner' && loan.branch_id !== req.user.branch_id) {
+      res.status(403).json({ error: 'Access to loan denied for your branch' });
       return;
     }
 
