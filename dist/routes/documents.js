@@ -32,6 +32,11 @@ const addHeader = (doc, title, settings) => {
 // GET /api/documents/receipt/:payment_id
 router.get('/receipt/:payment_id', async (req, res) => {
     try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const { data: payment } = await supabase_1.supabase
             .from('loan_payments')
             .select('*, loans(loan_code), customers(full_name, nic_number, customer_code)')
@@ -39,6 +44,11 @@ router.get('/receipt/:payment_id', async (req, res) => {
             .single();
         if (!payment) {
             res.status(404).json({ error: 'Payment not found' });
+            return;
+        }
+        // Branch isolation
+        if (user.role !== 'owner' && payment.branch_id !== user.branch_id) {
+            res.status(403).json({ error: 'Access to payment denied for your branch' });
             return;
         }
         res.setHeader('Content-Type', 'application/pdf');
@@ -97,6 +107,11 @@ router.get('/receipt/:payment_id', async (req, res) => {
 // GET /api/documents/statement/:customer_id
 router.get('/statement/:customer_id', async (req, res) => {
     try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const { data: customer } = await supabase_1.supabase
             .from('customers')
             .select('*')
@@ -104,6 +119,11 @@ router.get('/statement/:customer_id', async (req, res) => {
             .single();
         if (!customer) {
             res.status(404).json({ error: 'Customer not found' });
+            return;
+        }
+        // Branch isolation
+        if (user.role !== 'owner' && customer.branch_id !== user.branch_id) {
+            res.status(403).json({ error: 'Access to customer denied for your branch' });
             return;
         }
         const { data: loans } = await supabase_1.supabase
@@ -175,6 +195,11 @@ router.get('/statement/:customer_id', async (req, res) => {
 // GET /api/documents/loan-certificate/:loan_id
 router.get('/loan-certificate/:loan_id', async (req, res) => {
     try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const { data: loan } = await supabase_1.supabase
             .from('loans')
             .select('*, customers(full_name, nic_number, customer_code)')
@@ -182,6 +207,11 @@ router.get('/loan-certificate/:loan_id', async (req, res) => {
             .single();
         if (!loan || loan.status !== 'closed' || !loan.is_fully_paid) {
             res.status(400).json({ error: 'Loan is not fully settled' });
+            return;
+        }
+        // Branch isolation
+        if (user.role !== 'owner' && loan.branch_id !== user.branch_id) {
+            res.status(403).json({ error: 'Access to loan denied for your branch' });
             return;
         }
         res.setHeader('Content-Type', 'application/pdf');

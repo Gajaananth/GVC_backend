@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
+const logger_1 = require("../utils/logger");
 const zod_1 = require("zod");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
@@ -14,7 +15,13 @@ router.get('/', auth_1.requireOwner, async (_req, res) => {
         .limit(1)
         .single();
     if (error) {
-        res.status(500).json({ error: error.message });
+        logger_1.logger.error('Supabase error on settings GET:', error);
+        res.status(500).json({
+            error: error.message || 'Failed to load settings',
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+        });
         return;
     }
     res.json({ data });

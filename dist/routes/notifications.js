@@ -14,6 +14,11 @@ const smsSchema = zod_1.z.object({
 // POST /api/notifications/send-sms
 router.post('/send-sms', auth_1.requireAdmin, async (req, res) => {
     try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const { customer_id, message } = smsSchema.parse(req.body);
         const { data: customer } = await supabase_1.supabase
             .from('customers')
@@ -22,6 +27,11 @@ router.post('/send-sms', auth_1.requireAdmin, async (req, res) => {
             .single();
         if (!customer || !customer.phone) {
             res.status(400).json({ error: 'Customer not found or no phone number available' });
+            return;
+        }
+        // Branch isolation
+        if (user.role !== 'owner' && customer.branch_id !== user.branch_id) {
+            res.status(403).json({ error: 'Access to customer denied for your branch' });
             return;
         }
         // Call the sms utility
@@ -34,9 +44,9 @@ router.post('/send-sms', auth_1.requireAdmin, async (req, res) => {
             sent_at: new Date().toISOString()
         });
         await supabase_1.supabase.from('activity_logs').insert({
-            user_id: req.user.id,
-            user_name: req.user.full_name,
-            user_role: req.user.role,
+            user_id: user.id,
+            user_name: user.full_name,
+            user_role: user.role,
             action: 'SEND_SMS',
             entity_type: 'customer',
             entity_id: customer_id,
@@ -54,6 +64,26 @@ router.post('/send-sms', auth_1.requireAdmin, async (req, res) => {
 });
 // GET /api/notifications/history
 router.get('/history', auth_1.requireAdmin, async (req, res) => {
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ error: 'Not authenticated' });
+        return;
+    }
+    // Use local user for branch filtering
+    if (user.role !== 'owner') {
+        const resp = await supabase_1.supabase
+            .from('due_reminders')
+            .select('*, customers(full_name, phone)')
+            .order('created_at', { ascending: false })
+            .eq('customers.branch_id', user.branch_id)
+            .limit(100);
+        if (resp.error) {
+            res.status(500).json({ error: 'Failed to fetch notification history' });
+            return;
+        }
+        res.json({ data: resp.data });
+        return;
+    }
     const { data, error } = await supabase_1.supabase
         .from('due_reminders')
         .select('*, customers(full_name, phone)')

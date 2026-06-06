@@ -26,6 +26,11 @@ router.get('/', async (req, res) => {
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
     const offset = (pageNum - 1) * limitNum;
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ error: 'Not authenticated' });
+        return;
+    }
     let query = supabase_1.supabase
         .from('loan_payments')
         .select(`*, loans(loan_code), customers(full_name, customer_code)`, { count: 'exact' })
@@ -41,6 +46,13 @@ router.get('/', async (req, res) => {
         query = query.lte('payment_date', end_date);
     if (approval_status)
         query = query.eq('approval_status', approval_status);
+    // Scope results by branch/staff
+    if (user.role === 'staff') {
+        query = query.eq('created_by', user.id);
+    }
+    else if (user.role !== 'owner') {
+        query = query.eq('branch_id', user.branch_id);
+    }
     const { data, error, count } = await query;
     if (error) {
         res.status(500).json({ error: error.message });
@@ -51,6 +63,11 @@ router.get('/', async (req, res) => {
 // POST /api/payments — admin/owner only, immediate approval (staff use /api/collections/submit/payment)
 router.post('/', auth_1.requireAdmin, async (req, res) => {
     try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const body = recordPaymentSchema.parse(req.body);
         const paymentDate = body.payment_date || (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
         const cashAmount = body.cash_amount ?? (body.payment_method === 'cash' ? body.amount : 0);
@@ -90,9 +107,9 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             reference_number: body.reference_number,
             notes: body.notes,
             approval_status: 'approved',
-            approved_by: req.user.id,
+            approved_by: user.id,
             approved_at: new Date().toISOString(),
-            created_by: req.user.id
+            created_by: user.id
         })
             .select()
             .single();
@@ -100,14 +117,14 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             res.status(500).json({ error: payError?.message });
             return;
         }
-        const result = await (0, applyPayment_1.applyLoanPayment)(payment.id, req.user.id);
+        const result = await (0, applyPayment_1.applyLoanPayment)(payment.id, user.id);
         if (!result.success) {
             res.status(400).json({ error: result.error });
             return;
         }
         const { data: updatedLoan } = await supabase_1.supabase.from('loans').select('remaining_balance, is_fully_paid').eq('id', body.loan_id).single();
         await supabase_1.supabase.from('activity_logs').insert({
-            user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
+            user_id: user.id, user_name: user.full_name, user_role: user.role,
             action: 'CREATE', entity_type: 'payment',
             entity_id: payment.id, entity_code: payment.payment_code,
             description: `Admin recorded payment ${payment.payment_code}`
@@ -138,6 +155,21 @@ router.get('/:id', async (req, res) => {
         .single();
     if (error || !data) {
         res.status(404).json({ error: 'Payment not found' });
+        return;
+    }
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ error: 'Not authenticated' });
+        return;
+    }
+    // Branch isolation
+    if (user.role !== 'owner' && data.branch_id !== user.branch_id) {
+        res.status(403).json({ error: 'Access to payment denied for your branch' });
+        return;
+    }
+    // Staff can only access payments they created
+    if (user.role === 'staff' && data.created_by !== user.id) {
+        res.status(403).json({ error: 'Access to payment denied' });
         return;
     }
     res.json({ data });

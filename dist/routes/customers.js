@@ -44,6 +44,10 @@ router.get('/', async (req, res) => {
     if (req.user?.role !== 'owner') {
         query = query.eq('branch_id', req.user.branch_id);
     }
+    // Staff may only view customers assigned to them
+    if (req.user?.role === 'staff') {
+        query = query.eq('assigned_staff_id', req.user.id);
+    }
     if (search) {
         const safeSearch = search.replace(/"/g, '');
         query = query.or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%"`);
@@ -70,6 +74,16 @@ router.get('/:id', async (req, res) => {
         .single();
     if (error || !customer) {
         res.status(404).json({ error: 'Customer not found' });
+        return;
+    }
+    // Enforce branch isolation for non-owners
+    if (req.user?.role !== 'owner' && customer.branch_id !== req.user?.branch_id) {
+        res.status(403).json({ error: 'Access to customer denied for your branch' });
+        return;
+    }
+    // Staff may only access customers assigned to them
+    if (req.user?.role === 'staff' && customer.assigned_staff_id !== req.user.id) {
+        res.status(403).json({ error: 'Access to customer denied' });
         return;
     }
     const { data: loans } = await supabase_1.supabase

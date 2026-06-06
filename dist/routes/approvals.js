@@ -4,6 +4,7 @@ const express_1 = require("express");
 const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
 const loanCalculator_1 = require("../utils/loanCalculator");
+const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 // GET /api/approvals/loans/pending — owner only
@@ -162,7 +163,13 @@ router.get('/assignments/pending', auth_1.requireOwner, async (_req, res) => {
         .eq('status', 'pending_owner')
         .order('created_at', { ascending: false });
     if (error) {
-        res.status(500).json({ error: error.message });
+        logger_1.logger.error('Supabase error on approvals/assignments/pending:', error);
+        res.status(500).json({
+            error: error.message || 'Failed to load pending assignment changes',
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+        });
         return;
     }
     res.json({ data });

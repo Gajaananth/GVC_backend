@@ -4,6 +4,7 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
+const logger_1 = require("../utils/logger");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 const requireStaff = (0, auth_1.requireRole)('staff');
@@ -76,7 +77,13 @@ router.get('/pending', auth_1.requireAdmin, async (req, res) => {
     }
     const { data, error } = await pendingQuery.order('created_at', { ascending: false });
     if (error) {
-        res.status(500).json({ error: error.message });
+        logger_1.logger.error('Supabase error on forms/pending:', error);
+        res.status(500).json({
+            error: error.message || 'Failed to load pending physical forms',
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+        });
         return;
     }
     res.json({ data });

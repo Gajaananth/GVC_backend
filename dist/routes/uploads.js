@@ -21,6 +21,11 @@ const docTypeSchema = zod_1.z.enum([
 // POST /api/uploads/customers/:customerId — admin/owner only
 router.post('/customers/:customerId', auth_1.requireCustomerAdmin, upload.single('file'), async (req, res) => {
     try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const documentType = docTypeSchema.parse(req.body.document_type);
         const file = req.file;
         if (!file) {
@@ -29,11 +34,16 @@ router.post('/customers/:customerId', auth_1.requireCustomerAdmin, upload.single
         }
         const { data: customer } = await supabase_1.supabase
             .from('customers')
-            .select('id, customer_code, full_name')
+            .select('id, customer_code, full_name, branch_id')
             .eq('id', req.params.customerId)
             .single();
         if (!customer) {
             res.status(404).json({ error: 'Customer not found' });
+            return;
+        }
+        // Branch isolation
+        if (user.role !== 'owner' && customer.branch_id !== user.branch_id) {
+            res.status(403).json({ error: 'Cannot upload documents for customers outside your branch' });
             return;
         }
         const { url } = await (0, storage_1.uploadCustomerFile)(customer.id, documentType, file);
@@ -47,12 +57,12 @@ router.post('/customers/:customerId', auth_1.requireCustomerAdmin, upload.single
         });
         const field = storage_1.DOCUMENT_FIELD_MAP[documentType];
         if (field) {
-            await supabase_1.supabase.from('customers').update({ [field]: url, updated_by: req.user.id }).eq('id', customer.id);
+            await supabase_1.supabase.from('customers').update({ [field]: url, updated_by: user.id }).eq('id', customer.id);
         }
         await supabase_1.supabase.from('activity_logs').insert({
-            user_id: req.user.id,
-            user_name: req.user.full_name,
-            user_role: req.user.role,
+            user_id: user.id,
+            user_name: user.full_name,
+            user_role: user.role,
             action: 'UPLOAD',
             entity_type: 'customer_document',
             entity_id: customer.id,

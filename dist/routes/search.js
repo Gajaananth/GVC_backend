@@ -15,18 +15,55 @@ router.get('/', async (req, res) => {
         }
         const searchQuery = `%${q}%`;
         // Search Customers
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const safeSearch = q.replace(/"/g, '');
-        const { data: customers } = await supabase_1.supabase
+        let customersRes = await supabase_1.supabase
             .from('customers')
             .select('id, full_name, nic_number, customer_code, phone, photo_url')
             .or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%"`)
             .limit(5);
+        let customers = customersRes.data;
+        // Branch / staff scoping
+        if (user.role === 'staff') {
+            // staff only see assigned customers
+            const staffRes = await supabase_1.supabase
+                .from('customers')
+                .select('id, full_name, nic_number, customer_code, phone, photo_url')
+                .or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%"`)
+                .eq('assigned_staff_id', user.id)
+                .limit(5);
+            customers = staffRes.data;
+        }
+        else if (user.role !== 'owner') {
+            // branch-restricted search
+            const branchRes = await supabase_1.supabase
+                .from('customers')
+                .select('id, full_name, nic_number, customer_code, phone, photo_url')
+                .or(`full_name.ilike."%${safeSearch}%",nic_number.ilike."%${safeSearch}%",customer_code.ilike."%${safeSearch}%",phone.ilike."%${safeSearch}%"`)
+                .eq('branch_id', user.branch_id)
+                .limit(5);
+            customers = branchRes.data;
+        }
         // Search Loans
-        const { data: loans } = await supabase_1.supabase
+        let loansRes = await supabase_1.supabase
             .from('loans')
             .select('id, loan_code, status, customers(full_name)')
             .ilike('loan_code', searchQuery)
             .limit(5);
+        let loans = loansRes.data;
+        if (user.role !== 'owner') {
+            const branchLoansRes = await supabase_1.supabase
+                .from('loans')
+                .select('id, loan_code, status, customers(full_name)')
+                .ilike('loan_code', searchQuery)
+                .eq('branch_id', user.branch_id)
+                .limit(5);
+            loans = branchLoansRes.data;
+        }
         const results = [
             ...(customers || []).map(c => ({
                 type: 'customer',
