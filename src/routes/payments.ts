@@ -58,6 +58,9 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 // POST /api/payments — admin/owner only, immediate approval (staff use /api/collections/submit/payment)
 router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
     const body = recordPaymentSchema.parse(req.body);
     const paymentDate = body.payment_date || format(new Date(), 'yyyy-MM-dd');
     const cashAmount = body.cash_amount ?? (body.payment_method === 'cash' ? body.amount : 0);
@@ -94,16 +97,16 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
         reference_number: body.reference_number,
         notes: body.notes,
         approval_status: 'approved',
-        approved_by: req.user!.id,
+        approved_by: user.id,
         approved_at: new Date().toISOString(),
-        created_by: req.user!.id
+        created_by: user.id
       })
       .select()
       .single();
 
     if (payError || !payment) { res.status(500).json({ error: payError?.message }); return; }
 
-    const result = await applyLoanPayment(payment.id, req.user!.id);
+    const result = await applyLoanPayment(payment.id, user.id);
     if (!result.success) {
       res.status(400).json({ error: result.error });
       return;
@@ -112,7 +115,7 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
     const { data: updatedLoan } = await supabase.from('loans').select('remaining_balance, is_fully_paid').eq('id', body.loan_id).single();
 
     await supabase.from('activity_logs').insert({
-      user_id: req.user!.id, user_name: req.user!.full_name, user_role: req.user!.role,
+      user_id: user.id, user_name: user.full_name, user_role: user.role,
       action: 'CREATE', entity_type: 'payment',
       entity_id: payment.id, entity_code: payment.payment_code,
       description: `Admin recorded payment ${payment.payment_code}`
@@ -142,6 +145,8 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     .single();
 
   if (error || !data) { res.status(404).json({ error: 'Payment not found' }); return; }
+  const user = req.user;
+  if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
   // Branch isolation
   if (user.role !== 'owner' && data.branch_id !== user.branch_id) {
     res.status(403).json({ error: 'Access to payment denied for your branch' });

@@ -48,9 +48,9 @@ router.post('/send-sms', requireAdmin, async (req: AuthRequest, res: Response): 
     });
 
     await supabase.from('activity_logs').insert({
-      user_id: req.user!.id,
-      user_name: req.user!.full_name,
-      user_role: req.user!.role,
+      user_id: user.id,
+      user_name: user.full_name,
+      user_role: user.role,
       action: 'SEND_SMS',
       entity_type: 'customer',
       entity_id: customer_id,
@@ -69,6 +69,9 @@ router.post('/send-sms', requireAdmin, async (req: AuthRequest, res: Response): 
 
 // GET /api/notifications/history
 router.get('/history', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  const user = req.user;
+  if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
   // Use local user for branch filtering
   if (user.role !== 'owner') {
     const resp = await supabase
