@@ -11,7 +11,7 @@ const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   full_name: z.string().min(2),
-  role: z.enum(['owner', 'branch_manager', 'admin', 'staff', 'view_only']),
+  role: z.enum(['owner', 'branch_manager', 'admin', 'cashier', 'staff', 'view_only']),
   mobile: z.string().optional(),
   address: z.string().optional(),
   branch_id: z.string().uuid().optional() // Owner may omit
