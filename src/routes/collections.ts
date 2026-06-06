@@ -705,15 +705,25 @@ router.get('/corrections/approved', requireAdmin, async (_req: AuthRequest, res:
         SUPABASE_URL: !!process.env.SUPABASE_URL,
         SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY
       });
-      res.json({
-        data: [],
-        warning: 'Could not load approved corrections. Corrections queue is temporarily unavailable.',
-        debug: {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint
-        }
+
+      const permissionError = error.code === '42501' && error.message?.includes('permission denied');
+      if (permissionError) {
+        res.status(500).json({
+          error: 'Supabase service role permission denied for collection_correction_requests. Grant SELECT/UPDATE privileges to service_role on this table.',
+          debug: {
+            message: error.message,
+            code: error.code,
+            hint: error.hint
+          }
+        });
+        return;
+      }
+
+      res.status(500).json({
+        error: error.message || 'Supabase query failed',
+        code: error.code,
+        details: error.details,
+        hint: error.hint
       });
       return;
     }
