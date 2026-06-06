@@ -78,6 +78,11 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'GVC Finance API' });
 });
 
+// Root route
+app.get('/', (_req, res) => {
+  res.json({ status: 'ok', message: 'GVC Finance API is running', version: process.env.npm_package_version || 'unknown' });
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
