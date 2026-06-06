@@ -594,29 +594,65 @@ router.post('/corrections/:id/execute', requireAdminOrOwner, async (req, res) =>
         res.status(500).json({ error: 'Failed to execute correction' });
     }
 });
-// GET /api/collections/corrections/approved — admin/owner execute queue
-router.get('/corrections/approved', requireAdminOrOwner, async (_req, res) => {
-    const { data: requests, error } = await supabase_1.supabase
+async function fetchApprovedCorrectionRequests() {
+    let result = await supabase_1.supabase
         .from('collection_correction_requests')
         .select('*')
         .eq('status', 'approved')
         .order('owner_reviewed_at', { ascending: false });
-    if (error) {
-        res.status(500).json({ error: error.message });
-        return;
+    if (result.error) {
+        console.warn('Ordering by owner_reviewed_at failed, retrying with created_at:', result.error.message || result.error);
+        result = await supabase_1.supabase
+            .from('collection_correction_requests')
+            .select('*')
+            .eq('status', 'approved')
+            .order('created_at', { ascending: false });
     }
-    if (!requests || requests.length === 0) {
-        res.json({ data: [] });
-        return;
+    return result;
+}
+// GET /api/collections/corrections/approved — admin/owner execute queue
+router.get('/corrections/approved', auth_1.requireAdmin, async (_req, res) => {
+    try {
+        console.log('corrections/approved 호출', {
+            SUPABASE_URL: !!process.env.SUPABASE_URL,
+            SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+            JWT_SECRET: !!process.env.JWT_SECRET
+        });
+        const { data: requests, error } = await fetchApprovedCorrectionRequests();
+        if (error) {
+            console.error('Supabase error on corrections/approved:', error, {
+                SUPABASE_URL: !!process.env.SUPABASE_URL,
+                SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+            });
+            res.status(500).json({ error: error.message || 'Supabase query failed', debug: 'check server logs for Supabase error details' });
+            return;
+        }
+        const requestRows = Array.isArray(requests) ? requests : [];
+        if (requestRows.length === 0) {
+            res.json({ data: [] });
+            return;
+        }
+        const userIds = [...new Set(requestRows.map(r => r.requested_by).filter(Boolean))];
+        let userMap = new Map();
+        if (userIds.length > 0) {
+            const { data: users, error: userError } = await supabase_1.supabase.from('users').select('id, full_name').in('id', userIds);
+            if (userError) {
+                console.warn('Failed to fetch correction request users:', userError.message || userError);
+            }
+            else {
+                userMap = new Map((users || []).map(u => [u.id, u]));
+            }
+        }
+        const data = requestRows.map(r => ({
+            ...r,
+            requester: userMap.get(r.requested_by) || null
+        }));
+        res.json({ data });
     }
-    const userIds = [...new Set(requests.map(r => r.requested_by))];
-    const { data: users } = await supabase_1.supabase.from('users').select('id, full_name').in('id', userIds);
-    const userMap = new Map((users || []).map(u => [u.id, u]));
-    const data = requests.map(r => ({
-        ...r,
-        requester: userMap.get(r.requested_by) || null
-    }));
-    res.json({ data });
+    catch (err) {
+        console.error('Unhandled error in corrections/approved:', err);
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to load approved corrections' });
+    }
 });
 // GET /api/collections/daily-dues — staff (or admin) collection list for a date
 router.get('/daily-dues', async (req, res) => {

@@ -671,6 +671,25 @@ router.post('/corrections/:id/execute', requireAdminOrOwner, async (req: AuthReq
   }
 });
 
+async function fetchApprovedCorrectionRequests() {
+  let result = await supabase
+    .from('collection_correction_requests')
+    .select('*')
+    .eq('status', 'approved')
+    .order('owner_reviewed_at', { ascending: false });
+
+  if (result.error) {
+    console.warn('Ordering by owner_reviewed_at failed, retrying with created_at:', result.error.message || result.error);
+    result = await supabase
+      .from('collection_correction_requests')
+      .select('*')
+      .eq('status', 'approved')
+      .order('created_at', { ascending: false });
+  }
+
+  return result;
+}
+
 // GET /api/collections/corrections/approved — admin/owner execute queue
 router.get('/corrections/approved', requireAdmin, async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -680,25 +699,7 @@ router.get('/corrections/approved', requireAdmin, async (_req: AuthRequest, res:
       JWT_SECRET: !!process.env.JWT_SECRET
     });
 
-    // Try ordering by owner_reviewed_at (preferred). If that fails (e.g. DB missing column),
-    // retry ordering by created_at as a safe fallback to avoid returning 500 to the client.
-    let { data: requests, error } = await supabase
-      .from('collection_correction_requests')
-      .select('*')
-      .eq('status', 'approved')
-      .order('owner_reviewed_at', { ascending: false });
-
-    if (error) {
-      console.warn('Ordering by owner_reviewed_at failed, retrying with created_at:', error.message || error);
-      const retry = await supabase
-        .from('collection_correction_requests')
-        .select('*')
-        .eq('status', 'approved')
-        .order('created_at', { ascending: false });
-      requests = retry.data;
-      error = retry.error;
-    }
-
+    const { data: requests, error } = await fetchApprovedCorrectionRequests();
     if (error) {
       console.error('Supabase error on corrections/approved:', error, {
         SUPABASE_URL: !!process.env.SUPABASE_URL,
@@ -708,19 +709,24 @@ router.get('/corrections/approved', requireAdmin, async (_req: AuthRequest, res:
       return;
     }
 
-    if (!requests || requests.length === 0) {
+    const requestRows = Array.isArray(requests) ? requests : [];
+    if (requestRows.length === 0) {
       res.json({ data: [] });
       return;
     }
 
-    const userIds = [...new Set(requests.map(r => r.requested_by).filter(Boolean))];
+    const userIds = [...new Set(requestRows.map(r => r.requested_by).filter(Boolean))];
     let userMap = new Map<string, any>();
     if (userIds.length > 0) {
-      const { data: users } = await supabase.from('users').select('id, full_name').in('id', userIds);
-      userMap = new Map((users || []).map(u => [u.id, u]));
+      const { data: users, error: userError } = await supabase.from('users').select('id, full_name').in('id', userIds);
+      if (userError) {
+        console.warn('Failed to fetch correction request users:', userError.message || userError);
+      } else {
+        userMap = new Map((users || []).map(u => [u.id, u]));
+      }
     }
 
-    const data = requests.map(r => ({
+    const data = requestRows.map(r => ({
       ...r,
       requester: userMap.get(r.requested_by) || null
     }));
