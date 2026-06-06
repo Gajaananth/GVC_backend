@@ -17,6 +17,16 @@ router.get('/', requireOwner, async (_req: AuthRequest, res: Response): Promise<
 
   if (error) {
     logger.error('Supabase error on settings GET:', error);
+    // Detect Postgres permission denied (commonly SQLSTATE 42501) and return actionable message
+    const isPermissionDenied = error.code === '42501' || (typeof error.message === 'string' && error.message.toLowerCase().includes('permission denied'));
+    if (isPermissionDenied) {
+      res.status(500).json({
+        error: 'Database permission denied for `service_role` on table `company_settings`. Apply the required GRANTs as described in the migration README.',
+        action: 'Run the SQL from database/README_MIGRATION.md: GRANT USAGE ON SCHEMA public TO service_role; GRANT SELECT ON public.company_settings TO service_role;'
+      });
+      return;
+    }
+
     res.status(500).json({
       error: error.message || 'Failed to load settings',
       code: error.code,
@@ -53,7 +63,17 @@ router.put('/', requireOwner, async (req: AuthRequest, res: Response): Promise<v
       .select()
       .single();
 
-    if (error) { res.status(500).json({ error: error.message }); return; }
+    if (error) {
+      const isPermissionDenied = error.code === '42501' || (typeof error.message === 'string' && error.message.toLowerCase().includes('permission denied'));
+      if (isPermissionDenied) {
+        res.status(500).json({
+          error: 'Database permission denied for `service_role` on table `company_settings`. Apply the required GRANTs as described in the migration README.'
+        });
+        return;
+      }
+      res.status(500).json({ error: error.message });
+      return;
+    }
     res.json({ data, message: 'Settings updated successfully' });
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
