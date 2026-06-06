@@ -674,15 +674,37 @@ router.post('/corrections/:id/execute', requireAdminOrOwner, async (req: AuthReq
 // GET /api/collections/corrections/approved — admin/owner execute queue
 router.get('/corrections/approved', requireAdmin, async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { data: requests, error } = await supabase
+    console.log('corrections/approved 호출', {
+      SUPABASE_URL: !!process.env.SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      JWT_SECRET: !!process.env.JWT_SECRET
+    });
+
+    // Try ordering by owner_reviewed_at (preferred). If that fails (e.g. DB missing column),
+    // retry ordering by created_at as a safe fallback to avoid returning 500 to the client.
+    let { data: requests, error } = await supabase
       .from('collection_correction_requests')
       .select('*')
       .eq('status', 'approved')
       .order('owner_reviewed_at', { ascending: false });
 
     if (error) {
-      console.error('Supabase error on corrections/approved:', error);
-      res.status(500).json({ error: error.message });
+      console.warn('Ordering by owner_reviewed_at failed, retrying with created_at:', error.message || error);
+      const retry = await supabase
+        .from('collection_correction_requests')
+        .select('*')
+        .eq('status', 'approved')
+        .order('created_at', { ascending: false });
+      requests = retry.data;
+      error = retry.error;
+    }
+
+    if (error) {
+      console.error('Supabase error on corrections/approved:', error, {
+        SUPABASE_URL: !!process.env.SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+      });
+      res.status(500).json({ error: error.message || 'Supabase query failed', debug: 'check server logs for Supabase error details' });
       return;
     }
 
