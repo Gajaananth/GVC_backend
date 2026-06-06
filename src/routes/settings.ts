@@ -36,7 +36,22 @@ router.get('/', requireOwner, async (_req: AuthRequest, res: Response): Promise<
 
   const settings = Array.isArray(data) ? data[0] : data;
   if (!settings) {
-    res.status(404).json({ error: 'Settings not found' });
+    const defaultSettings = {
+      company_name: 'GVC Agro Finance',
+      company_address: '123 Main Road, Town, Sri Lanka',
+      company_phone: '011-1234567',
+      company_email: 'info@gvcagro.lk',
+      company_logo_url: null,
+      currency: 'LKR',
+      currency_symbol: '₨',
+      default_loan_interest_rate: 2.5,
+      default_savings_interest_rate: 6.0,
+      late_fee_percentage: 2.0,
+      grace_period_days: 3,
+      sms_enabled: false,
+      email_enabled: false
+    };
+    res.json({ data: defaultSettings });
     return;
   }
 
@@ -64,26 +79,38 @@ router.put('/', requireOwner, async (req: AuthRequest, res: Response): Promise<v
     const user = req.user;
     if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
 
-    const { data, error } = await supabase
+    const { data: updateData, error: updateError } = await supabase
       .from('company_settings')
       .update({ ...body, updated_by: user.id })
       .neq('id', '00000000-0000-0000-0000-000000000000') // update all rows
       .select();
 
-    if (error) {
-      const isPermissionDenied = error.code === '42501' || (typeof error.message === 'string' && error.message.toLowerCase().includes('permission denied'));
+    if (updateError) {
+      const isPermissionDenied = updateError.code === '42501' || (typeof updateError.message === 'string' && updateError.message.toLowerCase().includes('permission denied'));
       if (isPermissionDenied) {
         res.status(500).json({
           error: 'Database permission denied for `service_role` on table `company_settings`. Apply the required GRANTs as described in the migration README.'
         });
         return;
       }
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: updateError.message });
       return;
     }
 
-    const updatedSettings = Array.isArray(data) ? data[0] : data;
-    if (!updatedSettings) { res.status(404).json({ error: 'Settings not found' }); return; }
+    let updatedSettings = Array.isArray(updateData) ? updateData[0] : updateData;
+    if (!updatedSettings) {
+      const { data: insertData, error: insertError } = await supabase
+        .from('company_settings')
+        .insert({ ...body, updated_by: user.id })
+        .select()
+        .single();
+
+      if (insertError) {
+        res.status(500).json({ error: insertError.message });
+        return;
+      }
+      updatedSettings = insertData;
+    }
 
     res.json({ data: updatedSettings, message: 'Settings updated successfully' });
   } catch (err) {
