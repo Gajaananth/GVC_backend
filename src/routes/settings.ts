@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { supabase } from '../config/supabase';
 import { authenticateJWT, requireAdmin, requireOwner, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 import { z } from 'zod';
 
 const router = Router();
@@ -14,7 +15,16 @@ router.get('/', requireOwner, async (_req: AuthRequest, res: Response): Promise<
     .limit(1)
     .single();
 
-  if (error) { res.status(500).json({ error: error.message }); return; }
+  if (error) {
+    logger.error('Supabase error on settings GET:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to load settings',
+      code: error.code,
+      details: error.details,
+      hint: error.hint
+    });
+    return;
+  }
   res.json({ data });
 });
 

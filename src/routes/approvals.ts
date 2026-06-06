@@ -3,6 +3,7 @@ import { supabase } from '../config/supabase';
 import { authenticateJWT, requireOwner, requireAdmin, AuthRequest } from '../middleware/auth';
 import { calculateLoanProduct } from '../utils/loanCalculator';
 import { format } from 'date-fns';
+import { logger } from '../utils/logger';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -183,7 +184,13 @@ router.get('/assignments/pending', requireOwner, async (_req: AuthRequest, res: 
     .order('created_at', { ascending: false });
 
   if (error) {
-    res.status(500).json({ error: error.message });
+    logger.error('Supabase error on approvals/assignments/pending:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to load pending assignment changes',
+      code: error.code,
+      details: error.details,
+      hint: error.hint
+    });
     return;
   }
   res.json({ data });
