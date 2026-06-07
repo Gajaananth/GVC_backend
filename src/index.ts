@@ -9,6 +9,7 @@ import { requestLogger } from './middleware/requestLogger';
 
 // Routes
 import authRoutes from './routes/auth';
+import branchRoutes from './routes/branches';
 import userRoutes from './routes/users';
 import customerRoutes from './routes/customers';
 import loanRoutes from './routes/loans';
@@ -86,6 +87,7 @@ app.get('/', (_req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/branches', branchRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/loans', loanRoutes);

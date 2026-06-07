@@ -201,12 +201,24 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
   const eDate = (end_date as string) || format(endOfMonth(new Date()), 'yyyy-MM-dd');
 
   try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Authorization token required' });
+      return;
+    }
+
+    if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise'].includes(type)) {
+      res.status(403).json({ error: 'Staff are only permitted to export daily collections and customer-wise reports' });
+      return;
+    }
+
     if (fileFormat === 'excel') {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet('Report');
 
       if (type === 'daily_collection') {
-        const { data } = await supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name)`).gte('payment_date', sDate).lte('payment_date', eDate);
+        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name)`).gte('payment_date', sDate).lte('payment_date', eDate);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
         worksheet.columns = [
           { header: 'Receipt', key: 'payment_code', width: 20 },
           { header: 'Date', key: 'payment_date', width: 15 },
@@ -217,7 +229,9 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
         ];
         (data || []).forEach(p => worksheet.addRow({ ...p, customer: (p as any).customers?.full_name }));
       } else if (type === 'loan_summary') {
-        const { data } = await supabase.from('loans').select(`loan_code, status, principal_amount, remaining_balance, customers(full_name)`);
+        let query = supabase.from('loans').select(`loan_code, status, principal_amount, remaining_balance, customers(full_name)`);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
         worksheet.columns = [
           { header: 'Loan Code', key: 'loan_code', width: 20 },
           { header: 'Customer', key: 'customer', width: 30 },
@@ -227,7 +241,9 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
         ];
         (data || []).forEach(l => worksheet.addRow({ ...l, 'Customer': (l as any).customers?.full_name || 'N/A' }));
       } else if (type === 'savings_summary') {
-        const { data } = await supabase.from('savings_accounts').select(`account_code, is_active, balance, total_deposited, customers(full_name)`);
+        let query = supabase.from('savings_accounts').select(`account_code, is_active, balance, total_deposited, customers(full_name)`);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
         worksheet.columns = [
           { header: 'Account', key: 'account_code', width: 20 },
           { header: 'Customer', key: 'customer', width: 30 },
@@ -237,7 +253,9 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
         ];
         (data || []).forEach(a => worksheet.addRow({ ...a, 'Customer': (a as any).customers?.full_name || 'N/A' }));
       } else if (type === 'due_payment') {
-        const { data } = await supabase.from('v_overdue_loans').select('*');
+        let query = supabase.from('v_overdue_loans').select('*');
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
         worksheet.columns = [
           { header: 'Loan Code', key: 'loan_code', width: 20 },
           { header: 'Customer', key: 'customer_name', width: 30 },
