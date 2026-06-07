@@ -1,5 +1,7 @@
-/**
- * Returns true if a face is detected, or true when ML is unavailable (server still runs on Render).
- */
+export interface FaceValidationResult {
+    valid: boolean;
+    reason?: string;
+}
+export declare function validateFacePhoto(imageBuffer: Buffer): Promise<FaceValidationResult>;
 export declare function hasFace(imageBuffer: Buffer): Promise<boolean>;
 //# sourceMappingURL=faceDetection.d.ts.map

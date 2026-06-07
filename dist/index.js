@@ -32,6 +32,7 @@ const notifications_1 = __importDefault(require("./routes/notifications"));
 const import_export_1 = __importDefault(require("./routes/import-export"));
 const search_1 = __importDefault(require("./routes/search"));
 const cron_1 = __importDefault(require("./routes/cron"));
+const branches_1 = __importDefault(require("./routes/branches"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -71,6 +72,10 @@ app.use(requestLogger_1.requestLogger);
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'GVC Finance API' });
 });
+// Root route
+app.get('/', (_req, res) => {
+    res.json({ status: 'ok', message: 'GVC Finance API is running', version: process.env.npm_package_version || 'unknown' });
+});
 // API Routes
 app.use('/api/auth', auth_1.default);
 app.use('/api/users', users_1.default);
@@ -87,6 +92,7 @@ app.use('/api/uploads', uploads_1.default);
 app.use('/api/approvals', approvals_1.default);
 app.use('/api/collections', collections_1.default);
 app.use('/api/forms', forms_1.default);
+app.use('/api/branches', branches_1.default);
 app.use('/api/cron', cron_1.default);
 app.use('/api/documents', documents_1.default);
 app.use('/api/notifications', notifications_1.default);

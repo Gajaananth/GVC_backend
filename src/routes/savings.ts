@@ -70,6 +70,10 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     .single();
 
   if (error || !account) { res.status(404).json({ error: 'Savings account not found' }); return; }
+  if (req.user?.role !== 'owner' && account.branch_id !== req.user?.branch_id) {
+    res.status(403).json({ error: 'Access to savings account denied for your branch' });
+    return;
+  }
 
   const { data: transactions } = await supabase
     .from('savings_transactions')
@@ -87,7 +91,7 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
 
     const { data: customer } = await supabase
       .from('customers')
-      .select('id, full_name, is_active')
+      .select('id, full_name, is_active, branch_id')
       .eq('id', body.customer_id)
       .single();
 
@@ -96,9 +100,14 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
+    if (req.user?.role !== 'owner' && customer.branch_id !== req.user.branch_id) {
+      res.status(403).json({ error: 'Cannot create savings account for a customer in another branch' });
+      return;
+    }
+
     const { data, error } = await supabase
       .from('savings_accounts')
-      .insert({ ...body, created_by: req.user!.id })
+      .insert({ ...body, branch_id: customer.branch_id, created_by: req.user!.id })
       .select()
       .single();
 
@@ -133,12 +142,17 @@ router.post('/:id/transactions', requireAdmin, async (req: AuthRequest, res: Res
 
     if (accErr || !account) { res.status(404).json({ error: 'Savings account not found' }); return; }
     if (!account.is_active) { res.status(400).json({ error: 'Savings account is inactive' }); return; }
+    if (req.user?.role !== 'owner' && account.branch_id !== req.user.branch_id) {
+      res.status(403).json({ error: 'Cannot transact on savings account from another branch' });
+      return;
+    }
 
     const { data: tx, error: txErr } = await supabase
       .from('savings_transactions')
       .insert({
         account_id: req.params.id,
         customer_id: account.customer_id,
+        branch_id: account.branch_id,
         transaction_type: body.transaction_type,
         amount: body.amount,
         cash_amount: body.payment_method === 'cash' ? body.amount : 0,
@@ -150,8 +164,7 @@ router.post('/:id/transactions', requireAdmin, async (req: AuthRequest, res: Res
         description: body.description,
         approval_status: 'approved',
         approved_by: req.user!.id,
-        approved_at: new Date().toISOString(),
-        branch_id: req.user!.branch_id,
+        approved_at: new Date().toISOString()
       })
       .select()
       .single();

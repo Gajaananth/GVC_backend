@@ -1,1 +1,1 @@
-{"version":3,"file":"faceDetection.d.ts","sourceRoot":"","sources":["../../src/utils/faceDetection.ts"],"names":[],"mappings":"AAqCA;;GAEG;AACH,wBAAsB,OAAO,CAAC,WAAW,EAAE,MAAM,GAAG,OAAO,CAAC,OAAO,CAAC,CA2BnE"}
+{"version":3,"file":"faceDetection.d.ts","sourceRoot":"","sources":["../../src/utils/faceDetection.ts"],"names":[],"mappings":"AAMA,MAAM,WAAW,oBAAoB;IACnC,KAAK,EAAE,OAAO,CAAC;IACf,MAAM,CAAC,EAAE,MAAM,CAAC;CACjB;AA+BD,wBAAsB,iBAAiB,CAAC,WAAW,EAAE,MAAM,GAAG,OAAO,CAAC,oBAAoB,CAAC,CAkD1F;AAED,wBAAsB,OAAO,CAAC,WAAW,EAAE,MAAM,GAAG,OAAO,CAAC,OAAO,CAAC,CAGnE"}

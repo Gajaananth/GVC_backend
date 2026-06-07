@@ -149,6 +149,82 @@ router.post('/loans/:id/reject', auth_1.requireOwner, async (req, res) => {
     });
     res.json({ data, message: 'Loan rejected' });
 });
+// POST /api/approvals/loans/:id/forward — branch_manager only
+router.post('/loans/:id/forward', auth_1.requireBranchManager, async (req, res) => {
+    const { data: loan, error: fetchErr } = await supabase_1.supabase
+        .from('loans')
+        .select('*')
+        .eq('id', req.params.id)
+        .single();
+    if (fetchErr || !loan) {
+        res.status(404).json({ error: 'Loan not found' });
+        return;
+    }
+    if (loan.branch_id !== req.user?.branch_id) {
+        res.status(403).json({ error: 'Cannot review loans from another branch' });
+        return;
+    }
+    if (loan.approval_status !== 'pending_manager_review') {
+        res.status(400).json({ error: 'Loan is not pending manager review' });
+        return;
+    }
+    const { data, error } = await supabase_1.supabase
+        .from('loans')
+        .update({ approval_status: 'pending_approval', updated_by: req.user.id })
+        .eq('id', req.params.id)
+        .select('id, loan_code')
+        .single();
+    if (error || !data) {
+        res.status(500).json({ error: error?.message || 'Failed to forward loan for owner approval' });
+        return;
+    }
+    await supabase_1.supabase.from('activity_logs').insert({
+        user_id: req.user.id,
+        user_name: req.user.full_name,
+        user_role: req.user.role,
+        action: 'FORWARD',
+        entity_type: 'loan',
+        entity_id: data.id,
+        entity_code: data.loan_code,
+        description: `Branch manager forwarded loan ${data.loan_code} to owner approval`
+    });
+    res.json({ data, message: 'Loan forwarded for owner approval' });
+});
+// POST /api/approvals/loans/:id/manager-reject — branch_manager only
+router.post('/loans/:id/manager-reject', auth_1.requireBranchManager, async (req, res) => {
+    const { rejection_reason } = req.body;
+    if (!rejection_reason || typeof rejection_reason !== 'string') {
+        res.status(400).json({ error: 'Rejection reason is required' });
+        return;
+    }
+    const { data, error } = await supabase_1.supabase
+        .from('loans')
+        .update({
+        approval_status: 'rejected',
+        status: 'closed',
+        rejection_reason,
+        updated_by: req.user.id
+    })
+        .eq('id', req.params.id)
+        .eq('approval_status', 'pending_manager_review')
+        .select('id, loan_code')
+        .single();
+    if (error || !data) {
+        res.status(404).json({ error: 'Loan not found or already processed' });
+        return;
+    }
+    await supabase_1.supabase.from('activity_logs').insert({
+        user_id: req.user.id,
+        user_name: req.user.full_name,
+        user_role: req.user.role,
+        action: 'REJECT',
+        entity_type: 'loan',
+        entity_id: data.id,
+        entity_code: data.loan_code,
+        description: `Branch manager rejected loan ${data.loan_code}: ${rejection_reason}`
+    });
+    res.json({ data, message: 'Loan rejected by branch manager' });
+});
 // GET /api/approvals/assignments/pending — owner only
 router.get('/assignments/pending', auth_1.requireOwner, async (_req, res) => {
     const { data, error } = await supabase_1.supabase

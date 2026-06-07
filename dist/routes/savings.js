@@ -68,6 +68,10 @@ router.get('/:id', async (req, res) => {
         res.status(404).json({ error: 'Savings account not found' });
         return;
     }
+    if (req.user?.role !== 'owner' && account.branch_id !== req.user?.branch_id) {
+        res.status(403).json({ error: 'Access to savings account denied for your branch' });
+        return;
+    }
     const { data: transactions } = await supabase_1.supabase
         .from('savings_transactions')
         .select('*')
@@ -81,16 +85,20 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
         const body = createSavingsSchema.parse(req.body);
         const { data: customer } = await supabase_1.supabase
             .from('customers')
-            .select('id, full_name, is_active')
+            .select('id, full_name, is_active, branch_id')
             .eq('id', body.customer_id)
             .single();
         if (!customer || !customer.is_active) {
             res.status(404).json({ error: 'Customer not found or inactive' });
             return;
         }
+        if (req.user?.role !== 'owner' && customer.branch_id !== req.user.branch_id) {
+            res.status(403).json({ error: 'Cannot create savings account for a customer in another branch' });
+            return;
+        }
         const { data, error } = await supabase_1.supabase
             .from('savings_accounts')
-            .insert({ ...body, created_by: req.user.id })
+            .insert({ ...body, branch_id: customer.branch_id, created_by: req.user.id })
             .select()
             .single();
         if (error) {
@@ -132,11 +140,16 @@ router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
             res.status(400).json({ error: 'Savings account is inactive' });
             return;
         }
+        if (req.user?.role !== 'owner' && account.branch_id !== req.user.branch_id) {
+            res.status(403).json({ error: 'Cannot transact on savings account from another branch' });
+            return;
+        }
         const { data: tx, error: txErr } = await supabase_1.supabase
             .from('savings_transactions')
             .insert({
             account_id: req.params.id,
             customer_id: account.customer_id,
+            branch_id: account.branch_id,
             transaction_type: body.transaction_type,
             amount: body.amount,
             cash_amount: body.payment_method === 'cash' ? body.amount : 0,
@@ -148,8 +161,7 @@ router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
             description: body.description,
             approval_status: 'approved',
             approved_by: req.user.id,
-            approved_at: new Date().toISOString(),
-            branch_id: req.user.branch_id,
+            approved_at: new Date().toISOString()
         })
             .select()
             .single();

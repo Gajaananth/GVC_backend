@@ -24,12 +24,16 @@ const updateUserSchema = createUserSchema.partial().omit({ password: true }).ext
     is_active: zod_1.z.boolean().optional(),
     branch_id: zod_1.z.string().uuid().optional()
 });
-// GET /api/users - list all users (admin+)
-router.get('/', auth_1.requireAdmin, async (_req, res) => {
-    const { data, error } = await supabase_1.supabase
+// GET /api/users - list all users (owner all branches, others own branch only)
+router.get('/', auth_1.requireAdmin, async (req, res) => {
+    let query = supabase_1.supabase
         .from('users')
-        .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active, last_login_at, created_at')
+        .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active, last_login_at, created_at, branch_id')
         .order('created_at', { ascending: false });
+    if (req.user?.role !== 'owner') {
+        query = query.eq('branch_id', req.user?.branch_id);
+    }
+    const { data, error } = await query;
     if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -53,19 +57,64 @@ router.get('/me', async (req, res) => {
 router.get('/:id', auth_1.requireAdmin, async (req, res) => {
     const { data, error } = await supabase_1.supabase
         .from('users')
-        .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active, last_login_at, created_at')
+        .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active, last_login_at, created_at, branch_id')
         .eq('id', req.params.id)
         .single();
     if (error || !data) {
         res.status(404).json({ error: 'User not found' });
         return;
     }
+    if (req.user?.role !== 'owner' && data.branch_id !== req.user?.branch_id) {
+        res.status(403).json({ error: 'Access to user denied for your branch' });
+        return;
+    }
     res.json({ data });
 });
-// POST /api/users - create user (owner only)
-router.post('/', auth_1.requireOwner, async (req, res) => {
+// POST /api/users - create user (owner or branch manager)
+router.post('/', auth_1.requireOwnerOrBranchManager, async (req, res) => {
     try {
         const body = createUserSchema.parse(req.body);
+        if (body.role !== 'owner' && !body.branch_id) {
+            if (req.user.role === 'branch_manager') {
+                body.branch_id = req.user.branch_id;
+            }
+            else {
+                res.status(400).json({ error: 'Branch selection is required for non-owner users' });
+                return;
+            }
+        }
+        if (body.role === 'owner' && body.branch_id) {
+            res.status(400).json({ error: 'Owner cannot be assigned to a branch' });
+            return;
+        }
+        if (req.user.role === 'branch_manager') {
+            if (!['admin', 'cashier', 'staff', 'view_only'].includes(body.role)) {
+                res.status(403).json({ error: 'Branch managers can only create admin, cashier, staff, or view-only users' });
+                return;
+            }
+            if (body.branch_id && body.branch_id !== req.user.branch_id) {
+                res.status(403).json({ error: 'Branch managers can only create users for their own branch' });
+                return;
+            }
+            body.branch_id = req.user.branch_id;
+        }
+        const branchId = body.branch_id ?? null;
+        if (body.role !== 'owner' && !branchId) {
+            res.status(400).json({ error: 'Branch selection is required for non-owner users' });
+            return;
+        }
+        if (body.role === 'branch_manager') {
+            const { count } = await supabase_1.supabase
+                .from('users')
+                .select('id', { count: 'exact', head: true })
+                .eq('branch_id', branchId)
+                .eq('role', 'branch_manager')
+                .eq('is_active', true);
+            if ((count || 0) > 0) {
+                res.status(400).json({ error: 'This branch already has an active manager' });
+                return;
+            }
+        }
         const passwordHash = await bcryptjs_1.default.hash(body.password, 10);
         const { data, error } = await supabase_1.supabase
             .from('users')
@@ -76,6 +125,7 @@ router.post('/', auth_1.requireOwner, async (req, res) => {
             role: body.role,
             mobile: body.mobile,
             address: body.address,
+            branch_id: branchId,
             created_by: req.user.id
         })
             .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active, created_at')
@@ -114,21 +164,54 @@ router.post('/', auth_1.requireOwner, async (req, res) => {
 router.put('/:id', auth_1.requireAdmin, async (req, res) => {
     try {
         const body = updateUserSchema.parse(req.body);
-        const updateData = { ...body };
-        // Only owner can change roles
+        const { data: existingUser, error: existingError } = await supabase_1.supabase
+            .from('users')
+            .select('id, role, branch_id, is_active')
+            .eq('id', req.params.id)
+            .single();
+        if (existingError || !existingUser) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+        if (req.user.role !== 'owner' && existingUser.branch_id !== req.user.branch_id) {
+            res.status(403).json({ error: 'Cannot update users outside your branch' });
+            return;
+        }
         if (body.role && req.user.role !== 'owner') {
             res.status(403).json({ error: 'Only the owner can change user roles' });
             return;
         }
+        if (req.user.role === 'branch_manager' && body.branch_id && body.branch_id !== req.user.branch_id) {
+            res.status(403).json({ error: 'Branch managers can only assign users to their own branch' });
+            return;
+        }
+        const updateData = { ...body };
         if (body.password) {
             updateData.password_hash = await bcryptjs_1.default.hash(body.password, 10);
             delete updateData.password;
+        }
+        if (body.branch_id) {
+            updateData.branch_id = body.branch_id;
+        }
+        if ((body.role === 'branch_manager' || existingUser.role === 'branch_manager') && updateData.is_active !== false) {
+            const branchToCheck = body.branch_id || existingUser.branch_id;
+            const { count } = await supabase_1.supabase
+                .from('users')
+                .select('id', { count: 'exact', head: true })
+                .eq('branch_id', branchToCheck)
+                .eq('role', 'branch_manager')
+                .eq('is_active', true)
+                .neq('id', existingUser.id);
+            if ((count || 0) > 0) {
+                res.status(400).json({ error: 'This branch already has an active manager' });
+                return;
+            }
         }
         const { data, error } = await supabase_1.supabase
             .from('users')
             .update(updateData)
             .eq('id', req.params.id)
-            .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active')
+            .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active, branch_id')
             .single();
         if (error || !data) {
             res.status(404).json({ error: 'User not found' });

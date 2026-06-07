@@ -98,6 +98,7 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             .insert({
             loan_id: body.loan_id,
             customer_id: loan.customer_id,
+            branch_id: loan.branch_id,
             payment_date: paymentDate,
             amount: body.amount,
             cash_amount: cashAmount,

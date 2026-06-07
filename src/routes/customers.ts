@@ -16,6 +16,7 @@ const customerSchema = z.object({
   gender: z.enum(['male', 'female', 'other']).optional().nullable(),
   occupation: z.string().optional().nullable(),
   monthly_income: z.number().optional().nullable(),
+  branch_id: z.string().uuid().optional(),
   photo_url: z.string().url().min(1),
   nic_front_url: z.string().url().min(1),
   nic_back_url: z.string().url().min(1),
@@ -116,7 +117,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 
 import multer from 'multer';
 import { uploadCustomerFile } from '../utils/storage';
-import { hasFace } from '../utils/faceDetection';
+import { validateFacePhoto } from '../utils/faceDetection';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -150,10 +151,10 @@ router.post(
       return;
     }
 
-    // Validate that the photo contains at least one face
-    const containsFace = await hasFace(files.photo[0].buffer);
-    if (!containsFace) {
-      res.status(400).json({ error: 'Invalid profile photo. The uploaded image must contain at least one visible human face.' });
+    // Validate that the photo contains exactly one clear face
+    const faceValidation = await validateFacePhoto(files.photo[0].buffer);
+    if (!faceValidation.valid) {
+      res.status(400).json({ error: faceValidation.reason || 'Please upload a clear customer face photo.' });
       return;
     }
 
@@ -175,30 +176,40 @@ router.post(
     };
     
     const body = schemaWithoutUrls.parse(parsedBody);
-    
+    const branchId = req.user?.role === 'owner' ? body.branch_id : req.user!.branch_id;
+
+    if (!branchId) {
+      res.status(400).json({ error: 'Branch selection is required for customer creation' });
+      return;
+    }
+
+    if (req.user?.role !== 'owner' && body.branch_id && body.branch_id !== req.user!.branch_id) {
+      res.status(403).json({ error: 'Cannot create customers for another branch' });
+      return;
+    }
     const { registered_by_staff_id, assigned_staff_id, ...customerFields } = body;
     const staffId = assigned_staff_id || registered_by_staff_id;
 
     if (staffId) {
       const { data: staff } = await supabase
         .from('users')
-        .select('id, role')
+        .select('id, role, branch_id')
         .eq('id', staffId)
         .single();
-      if (!staff || !['staff', 'admin'].includes(staff.role)) {
+
+      if (!staff || !['staff', 'admin'].includes(staff.role) || staff.branch_id !== branchId) {
         res.status(400).json({ error: 'Invalid staff member for assignment' });
         return;
       }
     }
 
-    // Insert customer row first to get the ID, we will update the URLs immediately after
     const { data: customer, error: insertError } = await supabase
       .from('customers')
       .insert({
         ...customerFields,
         registered_by_staff_id: registered_by_staff_id || staffId || null,
         assigned_staff_id: staffId || null,
-        branch_id: req.user!.branch_id,
+        branch_id: branchId,
         created_by: req.user!.id,
         photo_url: 'pending', // Temporary placeholder
         nic_front_url: 'pending',
@@ -283,12 +294,37 @@ router.post(
 // PUT /api/customers/:id — admin/owner only
 router.put('/:id', requireCustomerAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const existing = await supabase
+      .from('customers')
+      .select('id, branch_id, assigned_staff_id, customer_code, full_name')
+      .eq('id', req.params.id)
+      .single();
+
+    if (existing.error || !existing.data) {
+      res.status(404).json({ error: 'Customer not found' });
+      return;
+    }
+
+    const customer = existing.data;
+    if (req.user?.role !== 'owner' && customer.branch_id !== req.user?.branch_id) {
+      res.status(403).json({ error: 'Cannot update customer from another branch' });
+      return;
+    }
+
+    const user = req.user!;
     const body = customerSchema.partial().parse(req.body);
+    if (user.role !== 'owner' && body.branch_id && body.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Cannot move customer to another branch' });
+      return;
+    }
+
     const { registered_by_staff_id: _omit, ...updateFields } = body;
+    const updatePayload = { ...updateFields, updated_by: user.id } as any;
+    if (user.role !== 'owner') delete updatePayload.branch_id;
 
     const { data, error } = await supabase
       .from('customers')
-      .update({ ...updateFields, updated_by: req.user!.id })
+      .update(updatePayload)
       .eq('id', req.params.id)
       .select()
       .single();
@@ -299,6 +335,7 @@ router.put('/:id', requireCustomerAdmin, async (req: AuthRequest, res: Response)
       user_id: req.user!.id, user_name: req.user!.full_name, user_role: req.user!.role,
       action: 'UPDATE', entity_type: 'customer',
       entity_id: data.id, entity_code: data.customer_code,
+      branch_id: customer.branch_id,
       description: `Updated customer: ${data.full_name}`
     });
 
@@ -343,6 +380,18 @@ router.delete('/:id', requireCustomerAdmin, async (req: AuthRequest, res: Respon
 });
 
 router.get('/:id/loans', async (req: AuthRequest, res: Response): Promise<void> => {
+  const { data: customer, error: customerError } = await supabase
+    .from('customers')
+    .select('branch_id')
+    .eq('id', req.params.id)
+    .single();
+
+  if (customerError || !customer) { res.status(404).json({ error: 'Customer not found' }); return; }
+  if (req.user?.role !== 'owner' && customer.branch_id !== req.user?.branch_id) {
+    res.status(403).json({ error: 'Access to customer loans denied for your branch' });
+    return;
+  }
+
   const { data, error } = await supabase
     .from('loans')
     .select('*, loan_payments(count)')
@@ -354,6 +403,18 @@ router.get('/:id/loans', async (req: AuthRequest, res: Response): Promise<void> 
 });
 
 router.get('/:id/savings', async (req: AuthRequest, res: Response): Promise<void> => {
+  const { data: customer, error: customerError } = await supabase
+    .from('customers')
+    .select('branch_id')
+    .eq('id', req.params.id)
+    .single();
+
+  if (customerError || !customer) { res.status(404).json({ error: 'Customer not found' }); return; }
+  if (req.user?.role !== 'owner' && customer.branch_id !== req.user?.branch_id) {
+    res.status(403).json({ error: 'Access to customer savings denied for your branch' });
+    return;
+  }
+
   const { data, error } = await supabase
     .from('savings_accounts')
     .select('*, savings_transactions(*)')

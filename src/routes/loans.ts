@@ -230,17 +230,35 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
       return;
     }
 
-    // Use customer's branch for loan
+    if (!customer.branch_id) {
+      res.status(400).json({ error: 'Customer branch is not assigned' });
+      return;
+    }
+
+    if (req.user?.role !== 'owner' && req.user?.branch_id !== customer.branch_id) {
+      res.status(403).json({ error: 'Cannot create loans for customers outside your branch' });
+      return;
+    }
+
     const loanBranchId = customer.branch_id;
+    const creatorRole = req.user?.role;
+    const isOwnerCreation = creatorRole === 'owner';
+    const isBranchManagerCreation = creatorRole === 'branch_manager';
+    const approvalStatus = isOwnerCreation ? 'approved' : isBranchManagerCreation ? 'pending_approval' : 'pending_manager_review';
+    const status = isOwnerCreation ? 'active' : 'pending_approval';
 
     for (const staffId of [body.applied_by, body.in_charge_user_id]) {
       const { data: staff } = await supabase
         .from('users')
-        .select('id, role, is_active')
+        .select('id, role, is_active, branch_id')
         .eq('id', staffId)
         .single();
-      if (!staff || !staff.is_active || !['staff', 'admin'].includes(staff.role)) {
-        res.status(400).json({ error: 'Applied-by and in-charge must be active staff or admin users' });
+      if (!staff || !staff.is_active || !['staff', 'admin', 'branch_manager', 'cashier'].includes(staff.role)) {
+        res.status(400).json({ error: 'Applied-by and in-charge must be active staff, branch manager, cashier, or admin users' });
+        return;
+      }
+      if (staff.branch_id !== customer.branch_id) {
+        res.status(400).json({ error: 'Assigned user must belong to the same branch as the customer' });
         return;
       }
     }
@@ -280,22 +298,24 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
         term_count: body.term_count,
         start_date: calc.creditDate,
         credit_date: calc.creditDate,
-        first_collection_date: calc.firstCollectionDate,
-        end_date: calc.endDate,
+        first_collection_date: isOwnerCreation ? calc.firstCollectionDate : null,
+        end_date: isOwnerCreation ? calc.endDate : null,
         total_interest: calc.totalInterest,
         total_payable: calc.totalPayable,
         installment_amount: calc.installmentAmount,
         remaining_balance: calc.totalPayable,
-        next_due_date: null,
+        next_due_date: isOwnerCreation ? calc.firstCollectionDate : null,
         purpose: body.purpose,
         guarantor_name: body.guarantor_name,
         guarantor_phone: body.guarantor_phone,
         collateral_notes: body.collateral_notes,
         notes: body.notes,
-        status: 'pending_approval',
-        approval_status: 'pending_approval',
+        status,
+        approval_status: approvalStatus,
         applied_by: body.applied_by,
         in_charge_user_id: body.in_charge_user_id,
+        approved_by: isOwnerCreation ? req.user!.id : null,
+        approved_at: isOwnerCreation ? new Date().toISOString() : null,
         created_by: req.user!.id
       })
       .select()
@@ -371,6 +391,28 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
     } catch (pdfErr) {
       // PDF generation failure should not block loan creation — log and continue
       console.error('Failed to generate/upload loan form PDF:', pdfErr);
+    }
+
+    if (isOwnerCreation) {
+      const scheduleRows = calc.schedule.map(s => ({
+        loan_id: loan.id,
+        installment_number: s.installmentNumber,
+        due_date: s.dueDate,
+        principal_amount: s.principalAmount,
+        interest_amount: s.interestAmount,
+        installment_amount: s.installmentAmount,
+        status: 'pending'
+      }));
+      await supabase.from('loan_schedule').insert(scheduleRows);
+
+      const reminderRows = calc.schedule.slice(0, 5).map(s => ({
+        loan_id: loan.id,
+        customer_id: loan.customer_id,
+        due_date: s.dueDate,
+        amount_due: s.installmentAmount,
+        reminder_type: 'installment'
+      }));
+      await supabase.from('due_reminders').insert(reminderRows);
     }
 
     await supabase.from('activity_logs').insert({

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requireOwner = exports.requireWrite = exports.requireCustomerAdmin = exports.requireAdmin = exports.requireRole = exports.authenticateJWT = void 0;
+exports.requireOwner = exports.requireWrite = exports.requireCustomerAdmin = exports.requireAdmin = exports.requireOwnerOrBranchManager = exports.requireBranchManager = exports.requireRole = exports.authenticateJWT = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const supabase_1 = require("../config/supabase");
 const authenticateJWT = async (req, res, next) => {
@@ -55,6 +55,19 @@ const requireRole = (...roles) => {
 };
 exports.requireRole = requireRole;
 // Middleware: owner or admin only
+exports.requireBranchManager = (0, exports.requireRole)('branch_manager');
+const requireOwnerOrBranchManager = (req, res, next) => {
+    if (!req.user) {
+        res.status(401).json({ error: 'Not authenticated' });
+        return;
+    }
+    if (req.user.role !== 'owner' && req.user.role !== 'branch_manager') {
+        res.status(403).json({ error: 'Insufficient permissions for this action' });
+        return;
+    }
+    next();
+};
+exports.requireOwnerOrBranchManager = requireOwnerOrBranchManager;
 exports.requireAdmin = (0, exports.requireRole)('owner', 'admin', 'branch_manager', 'cashier');
 // Admin + owner for customer create & document uploads (staff cannot)
 exports.requireCustomerAdmin = (0, exports.requireRole)('owner', 'admin', 'branch_manager', 'cashier');

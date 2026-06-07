@@ -79,6 +79,18 @@ export const requireRole = (...roles: string[]) => {
 };
 
 // Middleware: owner or admin only
+export const requireBranchManager = requireRole('branch_manager');
+export const requireOwnerOrBranchManager = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  if (req.user.role !== 'owner' && req.user.role !== 'branch_manager') {
+    res.status(403).json({ error: 'Insufficient permissions for this action' });
+    return;
+  }
+  next();
+};
 export const requireAdmin = requireRole('owner', 'admin', 'branch_manager', 'cashier');
 // Admin + owner for customer create & document uploads (staff cannot)
 export const requireCustomerAdmin = requireRole('owner', 'admin', 'branch_manager', 'cashier');
