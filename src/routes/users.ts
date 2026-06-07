@@ -24,11 +24,18 @@ const updateUserSchema = createUserSchema.partial().omit({ password: true }).ext
 });
 
 // GET /api/users - list all users (admin+)
-router.get('/', requireAdmin, async (_req: AuthRequest, res: Response): Promise<void> => {
-  const { data, error } = await supabase
+router.get('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  let query = supabase
     .from('users')
-    .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active, last_login_at, created_at')
+    .select('id, user_code, email, full_name, role, mobile, address, branch_id, avatar_url, is_active, last_login_at, created_at')
     .order('created_at', { ascending: false });
+
+  // Non-owner admins see only their branch users
+  if (req.user?.role !== 'owner') {
+    query = query.eq('branch_id', req.user!.branch_id);
+  }
+
+  const { data, error } = await query;
 
   if (error) { res.status(500).json({ error: error.message }); return; }
   res.json({ data });
@@ -62,6 +69,13 @@ router.get('/:id', requireAdmin, async (req: AuthRequest, res: Response): Promis
 router.post('/', requireOwner, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = createUserSchema.parse(req.body);
+    
+    // Validate branch_id for non-owner roles
+    if (body.role !== 'owner' && !body.branch_id) {
+      res.status(400).json({ error: 'branch_id is required for non-owner users' });
+      return;
+    }
+
     const passwordHash = await bcrypt.hash(body.password, 10);
 
     const { data, error } = await supabase
@@ -73,9 +87,10 @@ router.post('/', requireOwner, async (req: AuthRequest, res: Response): Promise<
         role: body.role,
         mobile: body.mobile,
         address: body.address,
+        branch_id: body.branch_id || null,
         created_by: req.user!.id
       })
-      .select('id, user_code, email, full_name, role, mobile, address, avatar_url, is_active, created_at')
+      .select('id, user_code, email, full_name, role, mobile, address, branch_id, avatar_url, is_active, created_at')
       .single();
 
     if (error) {
@@ -92,6 +107,7 @@ router.post('/', requireOwner, async (req: AuthRequest, res: Response): Promise<
       user_id: req.user!.id,
       user_name: req.user!.full_name,
       user_role: req.user!.role,
+      branch_id: body.branch_id || null,
       action: 'CREATE',
       entity_type: 'user',
       entity_id: data.id,
