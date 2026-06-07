@@ -29,7 +29,6 @@ import notificationsRoutes from './routes/notifications';
 import importExportRoutes from './routes/import-export';
 import searchRoutes from './routes/search';
 import cronRoutes from './routes/cron';
-import branchRoutes from './routes/branches';
 
 dotenv.config();
 
@@ -102,7 +101,6 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/collections', collectionRoutes);
 app.use('/api/forms', formRoutes);
-app.use('/api/branches', branchRoutes);
 app.use('/api/cron', cronRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/notifications', notificationsRoutes);
