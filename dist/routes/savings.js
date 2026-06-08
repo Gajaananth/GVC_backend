@@ -82,6 +82,11 @@ router.get('/:id', async (req, res) => {
 // POST /api/savings - create account (admin+ only; staff submit deposits via collections)
 router.post('/', auth_1.requireAdmin, async (req, res) => {
     try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const body = createSavingsSchema.parse(req.body);
         const { data: customer } = await supabase_1.supabase
             .from('customers')
@@ -92,13 +97,13 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             res.status(404).json({ error: 'Customer not found or inactive' });
             return;
         }
-        if (req.user?.role !== 'owner' && customer.branch_id !== req.user.branch_id) {
+        if (user.role !== 'owner' && customer.branch_id !== user.branch_id) {
             res.status(403).json({ error: 'Cannot create savings account for a customer in another branch' });
             return;
         }
         const { data, error } = await supabase_1.supabase
             .from('savings_accounts')
-            .insert({ ...body, branch_id: customer.branch_id, created_by: req.user.id })
+            .insert({ ...body, branch_id: customer.branch_id, created_by: user.id })
             .select()
             .single();
         if (error) {
@@ -106,10 +111,10 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             return;
         }
         await supabase_1.supabase.from('activity_logs').insert({
-            user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
+            user_id: user.id, user_name: user.full_name, user_role: user.role,
             action: 'CREATE', entity_type: 'savings',
             entity_id: data.id, entity_code: data.account_code,
-            branch_id: req.user.branch_id,
+            branch_id: user.branch_id,
             description: `Created savings account ${data.account_code} for ${customer.full_name}`
         });
         res.status(201).json({ data, message: 'Savings account created successfully' });
@@ -125,6 +130,11 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
 // POST /api/savings/:id/transactions — admin/owner immediate (staff use collections)
 router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
     try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
         const body = transactionSchema.parse(req.body);
         const txDate = body.transaction_date || (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
         const { data: account, error: accErr } = await supabase_1.supabase
@@ -140,7 +150,7 @@ router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
             res.status(400).json({ error: 'Savings account is inactive' });
             return;
         }
-        if (req.user?.role !== 'owner' && account.branch_id !== req.user.branch_id) {
+        if (user.role !== 'owner' && account.branch_id !== user.branch_id) {
             res.status(403).json({ error: 'Cannot transact on savings account from another branch' });
             return;
         }
@@ -160,7 +170,7 @@ router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
             reference_number: body.reference_number,
             description: body.description,
             approval_status: 'approved',
-            approved_by: req.user.id,
+            approved_by: user.id,
             approved_at: new Date().toISOString()
         })
             .select()
@@ -176,10 +186,10 @@ router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
         }
         const { data: updated } = await supabase_1.supabase.from('savings_accounts').select('balance').eq('id', req.params.id).single();
         await supabase_1.supabase.from('activity_logs').insert({
-            user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
+            user_id: user.id, user_name: user.full_name, user_role: user.role,
             action: 'CREATE', entity_type: 'savings_transaction',
             entity_id: tx.id, entity_code: tx.transaction_code,
-            branch_id: req.user.branch_id,
+            branch_id: user.branch_id,
             description: `Admin ${body.transaction_type} on ${account.account_code}`
         });
         res.status(201).json({ data: { ...tx, new_balance: updated?.balance }, message: `${body.transaction_type} successful` });

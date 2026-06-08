@@ -13,6 +13,7 @@ const errorHandler_1 = require("./middleware/errorHandler");
 const requestLogger_1 = require("./middleware/requestLogger");
 // Routes
 const auth_1 = __importDefault(require("./routes/auth"));
+const branches_1 = __importDefault(require("./routes/branches"));
 const users_1 = __importDefault(require("./routes/users"));
 const customers_1 = __importDefault(require("./routes/customers"));
 const loans_1 = __importDefault(require("./routes/loans"));
@@ -32,7 +33,6 @@ const notifications_1 = __importDefault(require("./routes/notifications"));
 const import_export_1 = __importDefault(require("./routes/import-export"));
 const search_1 = __importDefault(require("./routes/search"));
 const cron_1 = __importDefault(require("./routes/cron"));
-const branches_1 = __importDefault(require("./routes/branches"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -78,6 +78,7 @@ app.get('/', (_req, res) => {
 });
 // API Routes
 app.use('/api/auth', auth_1.default);
+app.use('/api/branches', branches_1.default);
 app.use('/api/users', users_1.default);
 app.use('/api/customers', customers_1.default);
 app.use('/api/loans', loans_1.default);
@@ -92,7 +93,6 @@ app.use('/api/uploads', uploads_1.default);
 app.use('/api/approvals', approvals_1.default);
 app.use('/api/collections', collections_1.default);
 app.use('/api/forms', forms_1.default);
-app.use('/api/branches', branches_1.default);
 app.use('/api/cron', cron_1.default);
 app.use('/api/documents', documents_1.default);
 app.use('/api/notifications', notifications_1.default);

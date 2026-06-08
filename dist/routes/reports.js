@@ -186,11 +186,22 @@ router.get('/:type/export/:format', async (req, res) => {
     const sDate = start_date || (0, date_fns_1.format)((0, date_fns_1.startOfMonth)(new Date()), 'yyyy-MM-dd');
     const eDate = end_date || (0, date_fns_1.format)((0, date_fns_1.endOfMonth)(new Date()), 'yyyy-MM-dd');
     try {
+        if (!req.user) {
+            res.status(401).json({ error: 'Authorization token required' });
+            return;
+        }
+        if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise'].includes(type)) {
+            res.status(403).json({ error: 'Staff are only permitted to export daily collections and customer-wise reports' });
+            return;
+        }
         if (fileFormat === 'excel') {
             const workbook = new exceljs_1.default.Workbook();
             const worksheet = workbook.addWorksheet('Report');
             if (type === 'daily_collection') {
-                const { data } = await supabase_1.supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name)`).gte('payment_date', sDate).lte('payment_date', eDate);
+                let query = supabase_1.supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name)`).gte('payment_date', sDate).lte('payment_date', eDate);
+                if (req.user?.role !== 'owner')
+                    query = query.eq('branch_id', req.user?.branch_id);
+                const { data } = await query;
                 worksheet.columns = [
                     { header: 'Receipt', key: 'payment_code', width: 20 },
                     { header: 'Date', key: 'payment_date', width: 15 },
@@ -202,7 +213,10 @@ router.get('/:type/export/:format', async (req, res) => {
                 (data || []).forEach(p => worksheet.addRow({ ...p, customer: p.customers?.full_name }));
             }
             else if (type === 'loan_summary') {
-                const { data } = await supabase_1.supabase.from('loans').select(`loan_code, status, principal_amount, remaining_balance, customers(full_name)`);
+                let query = supabase_1.supabase.from('loans').select(`loan_code, status, principal_amount, remaining_balance, customers(full_name)`);
+                if (req.user?.role !== 'owner')
+                    query = query.eq('branch_id', req.user?.branch_id);
+                const { data } = await query;
                 worksheet.columns = [
                     { header: 'Loan Code', key: 'loan_code', width: 20 },
                     { header: 'Customer', key: 'customer', width: 30 },
@@ -213,7 +227,10 @@ router.get('/:type/export/:format', async (req, res) => {
                 (data || []).forEach(l => worksheet.addRow({ ...l, 'Customer': l.customers?.full_name || 'N/A' }));
             }
             else if (type === 'savings_summary') {
-                const { data } = await supabase_1.supabase.from('savings_accounts').select(`account_code, is_active, balance, total_deposited, customers(full_name)`);
+                let query = supabase_1.supabase.from('savings_accounts').select(`account_code, is_active, balance, total_deposited, customers(full_name)`);
+                if (req.user?.role !== 'owner')
+                    query = query.eq('branch_id', req.user?.branch_id);
+                const { data } = await query;
                 worksheet.columns = [
                     { header: 'Account', key: 'account_code', width: 20 },
                     { header: 'Customer', key: 'customer', width: 30 },
@@ -224,7 +241,10 @@ router.get('/:type/export/:format', async (req, res) => {
                 (data || []).forEach(a => worksheet.addRow({ ...a, 'Customer': a.customers?.full_name || 'N/A' }));
             }
             else if (type === 'due_payment') {
-                const { data } = await supabase_1.supabase.from('v_overdue_loans').select('*');
+                let query = supabase_1.supabase.from('v_overdue_loans').select('*');
+                if (req.user?.role !== 'owner')
+                    query = query.eq('branch_id', req.user?.branch_id);
+                const { data } = await query;
                 worksheet.columns = [
                     { header: 'Loan Code', key: 'loan_code', width: 20 },
                     { header: 'Customer', key: 'customer_name', width: 30 },
