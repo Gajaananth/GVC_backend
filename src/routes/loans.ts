@@ -243,8 +243,7 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
     const loanBranchId = customer.branch_id;
     const creatorRole = req.user?.role;
     const isOwnerCreation = creatorRole === 'owner';
-    const isBranchManagerCreation = creatorRole === 'branch_manager';
-    const approvalStatus = isOwnerCreation ? 'approved' : isBranchManagerCreation ? 'pending_approval' : 'pending_manager_review';
+    const approvalStatus = isOwnerCreation ? 'approved' : 'pending_approval';
     const status = isOwnerCreation ? 'active' : 'pending_approval';
 
     for (const staffId of [body.applied_by, body.in_charge_user_id]) {
