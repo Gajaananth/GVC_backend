@@ -6,6 +6,7 @@ import { authenticateJWT, AuthRequest } from '../middleware/auth';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { sendEmail } from '../utils/email';
+import { getCompanySettings, addStandardHeader, drawTable, PDFTableColumn } from '../utils/pdfTableGenerator';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -274,18 +275,94 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
     } else if (fileFormat === 'pdf') {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=${type}-${sDate}-to-${eDate}.pdf`);
-      const doc = new PDFDocument({ margin: 30 });
+      const doc = new PDFDocument({ margin: 30, layout: 'landscape' });
       doc.pipe(res);
       
-      doc.fontSize(20).text('GVC Agro Finance', { align: 'center' });
-      doc.fontSize(16).text(`Report: ${type.toUpperCase().replace(/_/g, ' ')}`, { align: 'center' });
-      doc.fontSize(12).text(`Period: ${sDate} to ${eDate}`, { align: 'center' });
+      const settings = await getCompanySettings();
+      const title = `Report: ${type.toUpperCase().replace(/_/g, ' ')}`;
+      const subtitle = `Period: ${sDate} to ${eDate}`;
+      addStandardHeader(doc, title, settings, subtitle);
+
+      let columns: PDFTableColumn[] = [];
+      let rows: any[] = [];
+
+      if (type === 'daily_collection') {
+        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans(loan_code)`).gte('payment_date', sDate).lte('payment_date', eDate);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
+        columns = [
+          { header: 'Receipt', key: 'payment_code', width: 100 },
+          { header: 'Date', key: 'payment_date', width: 80 },
+          { header: 'Customer', key: 'customer', width: 150 },
+          { header: 'Loan', key: 'loan_code', width: 100 },
+          { header: 'Type', key: 'payment_type', width: 80 },
+          { header: 'Method', key: 'payment_method', width: 80 },
+          { header: 'Amount (LKR)', key: 'amount', width: 100, align: 'right' },
+        ];
+        rows = (data || []).map(p => ({
+          ...p,
+          customer: (p as any).customers?.full_name,
+          loan_code: (p as any).loans?.loan_code,
+          amount: Number(p.amount).toFixed(2)
+        }));
+      } else if (type === 'loan_summary') {
+        let query = supabase.from('loans').select(`loan_code, status, principal_amount, remaining_balance, customers(full_name)`);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
+        columns = [
+          { header: 'Loan Code', key: 'loan_code', width: 120 },
+          { header: 'Customer', key: 'customer', width: 200 },
+          { header: 'Status', key: 'status', width: 100 },
+          { header: 'Principal', key: 'principal', width: 120, align: 'right' },
+          { header: 'Balance', key: 'balance', width: 120, align: 'right' },
+        ];
+        rows = (data || []).map(l => ({
+          ...l,
+          customer: (l as any).customers?.full_name || 'N/A',
+          principal: Number(l.principal_amount).toFixed(2),
+          balance: Number(l.remaining_balance).toFixed(2)
+        }));
+      } else if (type === 'savings_summary') {
+        let query = supabase.from('savings_accounts').select(`account_code, is_active, balance, total_deposited, customers(full_name)`);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
+        columns = [
+          { header: 'Account', key: 'account_code', width: 120 },
+          { header: 'Customer', key: 'customer', width: 200 },
+          { header: 'Active', key: 'is_active', width: 80 },
+          { header: 'Balance', key: 'balance', width: 120, align: 'right' },
+          { header: 'Deposited', key: 'total_deposited', width: 120, align: 'right' },
+        ];
+        rows = (data || []).map(a => ({
+          ...a,
+          customer: (a as any).customers?.full_name || 'N/A',
+          balance: Number(a.balance).toFixed(2),
+          total_deposited: Number(a.total_deposited).toFixed(2)
+        }));
+      } else if (type === 'due_payment') {
+        let query = supabase.from('v_overdue_loans').select('*');
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
+        columns = [
+          { header: 'Loan Code', key: 'loan_code', width: 120 },
+          { header: 'Customer', key: 'customer_name', width: 200 },
+          { header: 'Overdue (Days)', key: 'days_overdue', width: 120 },
+          { header: 'Balance (LKR)', key: 'balance', width: 150, align: 'right' },
+        ];
+        rows = (data || []).map(l => ({
+          ...l,
+          balance: Number(l.remaining_balance).toFixed(2)
+        }));
+      }
+
+      if (columns.length > 0 && rows.length > 0) {
+        drawTable(doc, columns, rows, settings, title, subtitle);
+      } else {
+        doc.fontSize(10).text('No data available for the selected period.', { align: 'center' });
+      }
+
       doc.moveDown(2);
-      
-      doc.fontSize(10).text('This is an automated PDF export generated by GVC Agro Finance system. Detailed reports are recommended to be exported in Excel format for full tabular data analysis.', { align: 'center' });
-      
-      doc.moveDown(2);
-      doc.text(`Generated on: ${new Date().toLocaleString()}`);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, { align: 'center' });
       
       doc.end();
     } else {
