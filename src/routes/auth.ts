@@ -69,7 +69,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     };
 
     const accessToken = jwt.sign(payload, process.env.JWT_SECRET!, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '15m'
+      expiresIn: process.env.JWT_EXPIRES_IN || '24h'
     } as jwt.SignOptions);
 
     const refreshToken = jwt.sign({ id: user.id }, process.env.JWT_REFRESH_SECRET!, {
@@ -125,7 +125,7 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
     const accessToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, full_name: user.full_name, user_code: user.user_code },
       process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '15m' } as jwt.SignOptions
+      { expiresIn: process.env.JWT_EXPIRES_IN || '24h' } as jwt.SignOptions
     );
 
     res.json({ accessToken });
