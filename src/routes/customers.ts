@@ -286,7 +286,11 @@ router.post(
       throw new Error(`Failed to upload images: ${uploadErr instanceof Error ? uploadErr.message : 'Unknown error'}`);
     }
   } catch (err) {
-    if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
+    if (err instanceof z.ZodError) { 
+      const errorMsg = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+      res.status(400).json({ error: `Validation error: ${errorMsg}`, details: err.errors }); 
+      return; 
+    }
     res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to create customer' });
   }
 });
@@ -341,8 +345,12 @@ router.put('/:id', requireCustomerAdmin, async (req: AuthRequest, res: Response)
 
     res.json({ data, message: 'Customer updated successfully' });
   } catch (err) {
-    if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
-    res.status(500).json({ error: 'Failed to update customer' });
+    if (err instanceof z.ZodError) { 
+      const errorMsg = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+      res.status(400).json({ error: `Validation error: ${errorMsg}`, details: err.errors }); 
+      return; 
+    }
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to update customer' });
   }
 });
 
