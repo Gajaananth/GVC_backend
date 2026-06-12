@@ -26,13 +26,10 @@ export async function uploadCustomerFile(
     throw new Error('File size must be under 10MB');
   }
 
-  // Validate image dimensions for face photo (minimum 300x300)
+  // Validate image dimensions for face photo
   if (documentType === 'photo') {
-    const metadata = await sharp(file.buffer).metadata();
-    if (!metadata.width || !metadata.height || metadata.width < 300 || metadata.height < 300) {
-      throw new Error('Face photo must be at least 300x300 pixels');
-    }
-    // NOTE: Advanced face detection could be added here.
+    // We removed the 300x300 constraint per user request. 
+    // The AI face detection will still run to verify a face is present.
   }
 
   const ext = path.extname(file.originalname) || (file.mimetype === 'application/pdf' ? '.pdf' : '.jpg');
