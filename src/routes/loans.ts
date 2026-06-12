@@ -425,7 +425,9 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
 
     res.status(201).json({
       data: { ...loan, loan_form_url: loanFormUrl, loan_application_url: loanApplicationUrl, preview: calc },
-      message: 'Loan submitted for owner approval. Schedule is created when owner approves on credit date.'
+      message: isOwnerCreation 
+        ? 'Loan created successfully and schedule generated.' 
+        : 'Loan submitted for owner approval. Schedule is created when owner approves on credit date.'
     });
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
