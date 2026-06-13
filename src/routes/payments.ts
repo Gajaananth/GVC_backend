@@ -86,6 +86,7 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
         return;
       }
       if (loan.is_fully_paid) { res.status(400).json({ error: 'Loan is already fully paid' }); return; }
+
       if (body.amount > loan.remaining_balance + 1) {
         res.status(400).json({ error: `Amount exceeds remaining balance` });
         return;

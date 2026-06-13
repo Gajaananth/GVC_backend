@@ -7,10 +7,16 @@ const sms_1 = require("../utils/sms");
 const email_1 = require("../utils/email");
 const date_fns_1 = require("date-fns");
 const router = (0, express_1.Router)();
-// A simple API key middleware for cron tasks
+const cronKey = process.env.CRON_SECRET;
+if (!cronKey) {
+    logger_1.logger.warn('CRON_SECRET not set; cron routes are disabled.');
+}
 const requireCronKey = (req, res, next) => {
+    if (!cronKey) {
+        res.status(404).json({ error: 'Cron routes are unavailable' });
+        return;
+    }
     const authHeader = req.headers.authorization;
-    const cronKey = process.env.CRON_SECRET || 'secret_cron_key_123';
     if (!authHeader || authHeader !== `Bearer ${cronKey}`) {
         res.status(401).json({ error: 'Unauthorized cron access' });
         return;

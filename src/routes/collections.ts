@@ -873,4 +873,157 @@ router.get('/my-submissions', requireStaff, async (req: AuthRequest, res: Respon
   res.json({ data: { payments: payments || [], savings: savings || [] } });
 });
 
+// ============================================================
+// POST /api/collections/owner-batch-submit
+// Owner submits a queue of collections all at once (auto-approved).
+// Returns enriched results for client-side PDF + Excel download.
+// ============================================================
+const ownerBatchItemSchema = z.object({
+  loan_id: z.string().uuid(),
+  amount: z.number().positive(),
+  cash_amount: z.number().min(0),
+  online_amount: z.number().min(0),
+  payment_type: z.enum(['regular', 'partial', 'full_settlement', 'advance']).default('regular'),
+  notes: z.string().optional().nullable(),
+}).refine(d => Math.abs(d.cash_amount + d.online_amount - d.amount) < 0.01, {
+  message: 'Cash + online must equal total amount'
+});
+
+const ownerBatchSchema = z.array(ownerBatchItemSchema).min(1);
+
+router.post('/owner-batch-submit', requireOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const items = ownerBatchSchema.parse(req.body);
+    const user = req.user!;
+    const paymentDate = today();
+
+    const results: any[] = [];
+
+    for (const item of items) {
+      // Fetch loan
+      const { data: loan } = await supabase
+        .from('loans')
+        .select('id, loan_code, customer_id, branch_id, remaining_balance, approval_status, is_fully_paid, customers(id, full_name, customer_code, phone, nic_number)')
+        .eq('id', item.loan_id)
+        .single();
+
+      if (!loan || loan.approval_status !== 'approved' || loan.is_fully_paid) {
+        results.push({ loan_id: item.loan_id, error: 'Loan not available for collection' });
+        continue;
+      }
+      if (item.amount > Number(loan.remaining_balance) + 1) {
+        results.push({ loan_id: item.loan_id, error: 'Amount exceeds remaining balance' });
+        continue;
+      }
+      if (item.payment_type === 'full_settlement' && Math.abs(item.amount - Number(loan.remaining_balance)) > 1) {
+        results.push({ loan_id: item.loan_id, error: 'Full settlement amount must equal remaining balance' });
+        continue;
+      }
+
+      const { data: payment, error: payError } = await supabase
+        .from('loan_payments')
+        .insert({
+          loan_id: item.loan_id,
+          customer_id: loan.customer_id,
+          branch_id: loan.branch_id,
+          payment_date: paymentDate,
+          amount: item.amount,
+          cash_amount: item.cash_amount,
+          online_amount: item.online_amount,
+          payment_type: item.payment_type,
+          payment_method: item.cash_amount >= item.online_amount ? 'cash' : 'mobile',
+          notes: item.notes,
+          approval_status: 'approved',
+          approved_by: user.id,
+          approved_at: new Date().toISOString(),
+          created_by: user.id,
+          principal_paid: 0,
+          interest_paid: 0,
+        })
+        .select()
+        .single();
+
+      if (payError || !payment) {
+        results.push({ loan_id: item.loan_id, error: payError?.message || 'Insert failed' });
+        continue;
+      }
+
+      const applyResult = await applyLoanPayment(payment.id, user.id);
+      if (!applyResult.success) {
+        results.push({ loan_id: item.loan_id, error: applyResult.error });
+        continue;
+      }
+
+      const { data: updatedLoan } = await supabase
+        .from('loans')
+        .select('remaining_balance, is_fully_paid')
+        .eq('id', item.loan_id)
+        .single();
+
+      await supabase.from('activity_logs').insert({
+        user_id: user.id, user_name: user.full_name, user_role: user.role,
+        action: 'CREATE', entity_type: 'payment',
+        entity_id: payment.id, entity_code: payment.payment_code,
+        description: `Owner batch collected ${payment.payment_code} (auto-approved)`
+      });
+
+      const customer = (loan as any).customers;
+      if (customer?.phone) {
+        const msg = `Dear ${customer.full_name}, your payment of LKR ${item.amount} for loan ${loan.loan_code} has been received. Thank you. GVC Agro Finance.`;
+        await sendSMS(customer.phone, msg);
+      }
+
+      results.push({
+        payment_code: payment.payment_code,
+        payment_id: payment.id,
+        loan_id: loan.id,
+        loan_code: loan.loan_code,
+        customer_name: customer?.full_name || '',
+        customer_code: customer?.customer_code || '',
+        phone: customer?.phone || '',
+        payment_date: paymentDate,
+        amount: item.amount,
+        cash_amount: item.cash_amount,
+        online_amount: item.online_amount,
+        payment_type: item.payment_type,
+        new_balance: updatedLoan?.remaining_balance ?? null,
+        is_fully_paid: updatedLoan?.is_fully_paid ?? false,
+        error: null,
+      });
+    }
+
+    const successful = results.filter(r => !r.error);
+    const failed = results.filter(r => r.error);
+    const totalCollected = successful.reduce((s, r) => s + Number(r.amount), 0);
+    const totalCash = successful.reduce((s, r) => s + Number(r.cash_amount), 0);
+    const totalOnline = successful.reduce((s, r) => s + Number(r.online_amount), 0);
+
+    res.status(201).json({
+      data: {
+        results,
+        successful,
+        failed,
+        summary: {
+          total_items: items.length,
+          total_success: successful.length,
+          total_failed: failed.length,
+          total_collected: totalCollected,
+          total_cash: totalCash,
+          total_online: totalOnline,
+          collection_date: paymentDate,
+          collected_by: user.full_name,
+        }
+      },
+      message: `${successful.length} of ${items.length} collections processed successfully`
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: err.errors[0]?.message || 'Validation error' });
+      return;
+    }
+    console.error('owner-batch-submit error:', err);
+    res.status(500).json({ error: 'Failed to process batch collection' });
+  }
+});
+
 export default router;
