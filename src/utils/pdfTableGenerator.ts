@@ -1,6 +1,8 @@
 import PDFDocument from 'pdfkit';
 import { supabase } from '../config/supabase';
 import { format } from 'date-fns';
+import path from 'path';
+import fs from 'fs';
 
 export interface PDFTableColumn {
   header: string;
@@ -29,6 +31,12 @@ export const getCompanySettings = async () => {
 };
 
 export const addStandardHeader = (doc: PDFKit.PDFDocument, title: string, settings: any, subtitle?: string) => {
+  const logoPath = path.join(process.cwd(), 'logo.png');
+  if (fs.existsSync(logoPath)) {
+    doc.image(logoPath, (doc.page.width - 80) / 2, doc.y, { width: 80 });
+    doc.moveDown(5); // Make room for the logo
+  }
+
   doc.fontSize(22).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
   doc.fontSize(10).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });
   doc.text(`Tel: ${settings.company_phone} | Email: ${settings.company_email}`, { align: 'center' });
