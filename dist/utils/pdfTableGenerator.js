@@ -1,7 +1,12 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.drawTable = exports.addStandardHeader = exports.getCompanySettings = void 0;
 const supabase_1 = require("../config/supabase");
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 // Fetch company settings (mirrors documents.ts helper)
 const getCompanySettings = async () => {
     const { data, error } = await supabase_1.supabase.from('company_settings').select('*').limit(1);
@@ -22,6 +27,11 @@ const getCompanySettings = async () => {
 };
 exports.getCompanySettings = getCompanySettings;
 const addStandardHeader = (doc, title, settings, subtitle) => {
+    const logoPath = path_1.default.join(process.cwd(), 'logo.png');
+    if (fs_1.default.existsSync(logoPath)) {
+        doc.image(logoPath, (doc.page.width - 80) / 2, doc.y, { width: 80 });
+        doc.moveDown(5); // Make room for the logo
+    }
     doc.fontSize(22).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
     doc.fontSize(10).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });
     doc.text(`Tel: ${settings.company_phone} | Email: ${settings.company_email}`, { align: 'center' });

@@ -159,7 +159,6 @@ router.post('/:id/transactions', auth_1.requireAdmin, async (req, res) => {
             .insert({
             account_id: req.params.id,
             customer_id: account.customer_id,
-            branch_id: account.branch_id,
             transaction_type: body.transaction_type,
             amount: body.amount,
             cash_amount: body.payment_method === 'cash' ? body.amount : 0,

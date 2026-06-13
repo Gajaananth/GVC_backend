@@ -30,12 +30,12 @@ router.get('/:type', async (req, res) => {
             case 'daily_collection': {
                 let query = supabase_1.supabase
                     .from('loan_payments')
-                    .select(`payment_code, payment_date, amount, payment_type, payment_method, loans(loan_code), customers(full_name, customer_code, phone)`)
+                    .select(`payment_code, payment_date, amount, payment_type, payment_method, loans!inner(loan_code, branch_id), customers(full_name, customer_code, phone)`)
                     .gte('payment_date', sDate)
                     .lte('payment_date', eDate)
                     .order('payment_date', { ascending: false });
                 if (req.user?.role !== 'owner')
-                    query = query.eq('branch_id', req.user?.branch_id);
+                    query = query.eq('loans.branch_id', req.user?.branch_id);
                 const { data } = await query;
                 const total = (data || []).reduce((sum, p) => sum + p.amount, 0);
                 reportData = { payments: data || [], total_collected: total, period: { start: sDate, end: eDate } };
@@ -44,11 +44,11 @@ router.get('/:type', async (req, res) => {
             case 'monthly_finance': {
                 let paymentsQuery = supabase_1.supabase
                     .from('loan_payments')
-                    .select('amount, payment_date, payment_type')
+                    .select('amount, payment_date, payment_type, loans!inner(branch_id)')
                     .gte('payment_date', sDate)
                     .lte('payment_date', eDate);
                 if (req.user?.role !== 'owner')
-                    paymentsQuery = paymentsQuery.eq('branch_id', req.user?.branch_id);
+                    paymentsQuery = paymentsQuery.eq('loans.branch_id', req.user?.branch_id);
                 const { data: payments } = await paymentsQuery;
                 let newLoansQuery = supabase_1.supabase
                     .from('loans')
@@ -60,11 +60,11 @@ router.get('/:type', async (req, res) => {
                 const { data: newLoans } = await newLoansQuery;
                 let savingsQuery = supabase_1.supabase
                     .from('savings_transactions')
-                    .select('amount, transaction_type, transaction_date')
+                    .select('amount, transaction_type, transaction_date, savings_accounts!inner(branch_id)')
                     .gte('transaction_date', sDate)
                     .lte('transaction_date', eDate);
                 if (req.user?.role !== 'owner')
-                    savingsQuery = savingsQuery.eq('branch_id', req.user?.branch_id);
+                    savingsQuery = savingsQuery.eq('savings_accounts.branch_id', req.user?.branch_id);
                 const { data: savings } = await savingsQuery;
                 const totalCollections = (payments || []).reduce((s, p) => s + p.amount, 0);
                 const totalDisbursed = (newLoans || []).reduce((s, l) => s + l.principal_amount, 0);
@@ -145,11 +145,11 @@ router.get('/:type', async (req, res) => {
             case 'income': {
                 let query = supabase_1.supabase
                     .from('loan_payments')
-                    .select('amount, interest_paid, payment_date, payment_method')
+                    .select('amount, interest_paid, payment_date, payment_method, loans!inner(branch_id)')
                     .gte('payment_date', sDate)
                     .lte('payment_date', eDate);
                 if (req.user?.role !== 'owner')
-                    query = query.eq('branch_id', req.user?.branch_id);
+                    query = query.eq('loans.branch_id', req.user?.branch_id);
                 const { data: payments } = await query;
                 const totalIncome = (payments || []).reduce((s, p) => s + (p.interest_paid || 0), 0);
                 reportData = {
@@ -186,6 +186,7 @@ router.get('/:type/export/:format', async (req, res) => {
     const { start_date, end_date } = req.query;
     const sDate = start_date || (0, date_fns_1.format)((0, date_fns_1.startOfMonth)(new Date()), 'yyyy-MM-dd');
     const eDate = end_date || (0, date_fns_1.format)((0, date_fns_1.endOfMonth)(new Date()), 'yyyy-MM-dd');
+    const endOfDayDate = `${eDate} 23:59:59`;
     try {
         if (!req.user) {
             res.status(401).json({ error: 'Authorization token required' });
@@ -199,9 +200,9 @@ router.get('/:type/export/:format', async (req, res) => {
             const workbook = new exceljs_1.default.Workbook();
             const worksheet = workbook.addWorksheet('Report');
             if (type === 'daily_collection') {
-                let query = supabase_1.supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name)`).gte('payment_date', sDate).lte('payment_date', eDate);
+                let query = supabase_1.supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans!inner(branch_id)`).gte('payment_date', sDate).lte('payment_date', endOfDayDate);
                 if (req.user?.role !== 'owner')
-                    query = query.eq('branch_id', req.user?.branch_id);
+                    query = query.eq('loans.branch_id', req.user?.branch_id);
                 const { data } = await query;
                 worksheet.columns = [
                     { header: 'Receipt', key: 'payment_code', width: 20 },
@@ -257,6 +258,9 @@ router.get('/:type/export/:format', async (req, res) => {
             else {
                 worksheet.addRow(['Export data available in JSON format, basic Excel provided']);
             }
+            worksheet.addRow([]);
+            worksheet.addRow(['Generated on:', new Date().toLocaleString()]);
+            worksheet.addRow(['Downloaded on:', new Date().toLocaleString()]);
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
             res.setHeader('Content-Disposition', `attachment; filename=${type}-${sDate}-to-${eDate}.xlsx`);
             await workbook.xlsx.write(res);
@@ -274,9 +278,9 @@ router.get('/:type/export/:format', async (req, res) => {
             let columns = [];
             let rows = [];
             if (type === 'daily_collection') {
-                let query = supabase_1.supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans(loan_code)`).gte('payment_date', sDate).lte('payment_date', eDate);
+                let query = supabase_1.supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans!inner(loan_code, branch_id)`).gte('payment_date', sDate).lte('payment_date', endOfDayDate);
                 if (req.user?.role !== 'owner')
-                    query = query.eq('branch_id', req.user?.branch_id);
+                    query = query.eq('loans.branch_id', req.user?.branch_id);
                 const { data } = await query;
                 columns = [
                     { header: 'Receipt', key: 'payment_code', width: 100 },

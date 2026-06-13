@@ -552,4 +552,331 @@ router.get('/:id/certificate', async (req: AuthRequest, res: Response): Promise<
   }
 });
 
+// GET /api/fixed-deposits/:id/creation-certificate
+router.get('/:id/creation-certificate', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { data: fd } = await supabase
+      .from('fixed_deposits')
+      .select('*, customers(full_name, nic_number, address)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (!fd) { res.status(404).json({ error: 'Fixed deposit not found' }); return; }
+
+    if (req.user?.role !== 'owner' && fd.branch_id !== req.user?.branch_id) {
+      res.status(403).json({ error: 'Access denied' }); return;
+    }
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=FD-Creation-${fd.fd_code}.pdf`);
+    doc.pipe(res);
+
+    // Company Header
+    doc.fontSize(18).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });
+    doc.text(`Mobile: ${settings.company_phone}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.fontSize(14).font('Helvetica-Bold').text('FIXED DEPOSIT CERTIFICATE', { align: 'center' });
+    doc.moveDown(2);
+
+    // Declaration
+    doc.fontSize(11).font('Helvetica').text('This is to certify that:', { align: 'left' });
+    doc.moveDown(0.5);
+    doc.fontSize(12).font('Helvetica-Bold').text(fd.customers.full_name, { align: 'left' });
+    doc.fontSize(10).font('Helvetica').text(`NIC: ${fd.customers.nic_number}`, { align: 'left' });
+    doc.moveDown(1);
+
+    doc.fontSize(11).text('has invested the stated amount as a Fixed Deposit with GVC under the terms and conditions agreed by both parties. Upon successful completion of the deposit period, the customer shall be entitled to receive the maturity amount as specified below, subject to company policies and applicable regulations.');
+    doc.moveDown(1.5);
+
+    // Certificate Details Box
+    const startX = 60;
+    let currY = doc.y;
+    doc.rect(startX - 10, currY, doc.page.width - 120, 200).stroke('#cccccc');
+    currY += 15;
+
+    doc.font('Helvetica-Bold').fontSize(10).text('Certificate Number:', startX, currY);
+    doc.font('Helvetica').text(fd.fd_code, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Customer Name:', startX, currY);
+    doc.font('Helvetica').text(fd.customers.full_name, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Principal Amount:', startX, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${Number(fd.principal_amount).toLocaleString()}`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Interest Rate:', startX, currY);
+    doc.font('Helvetica').text(`${fd.interest_rate}% p.a.`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('FD Period:', startX, currY);
+    doc.font('Helvetica').text(`${fd.term_months} Months`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Deposit Date:', startX, currY);
+    doc.font('Helvetica').text(new Date(fd.created_at).toLocaleDateString(), startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Maturity Date:', startX, currY);
+    doc.font('Helvetica').text(new Date(fd.maturity_date).toLocaleDateString(), startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Expected Maturity Amount:', startX, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${Number(fd.total_maturity_amount).toLocaleString()}`, startX + 160, currY);
+
+    doc.moveDown(8);
+
+    // Signatures
+    const sigY = doc.page.height - 180;
+    doc.fontSize(10);
+
+    // Customer Signature
+    doc.text('_____________________', startX, sigY);
+    doc.text('Customer Signature', startX, sigY + 18);
+    doc.text('Name: _________________', startX, sigY + 32);
+    doc.text('Date: _________________', startX, sigY + 46);
+
+    // Owner Signature
+    doc.text('_____________________', doc.page.width - 220, sigY);
+    doc.text('Owner / Authorized Officer', doc.page.width - 220, sigY + 18);
+    doc.text('Name: _________________', doc.page.width - 220, sigY + 32);
+    doc.text('Date: _________________', doc.page.width - 220, sigY + 46);
+
+    // Seal area
+    doc.rect(doc.page.width - 180, sigY + 60, 120, 60).stroke('#cccccc');
+    doc.fontSize(9).text('Company Seal', doc.page.width - 175, sigY + 75, { align: 'center' });
+
+    doc.end();
+  } catch (err) {
+    console.error('Creation Certificate Error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to generate certificate' });
+  }
+});
+
+// GET /api/fixed-deposits/:id/early-closure-certificate
+router.get('/:id/early-closure-certificate', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { data: fd } = await supabase
+      .from('fixed_deposits')
+      .select('*, customers(full_name, nic_number, address)')
+      .eq('id', req.params.id)
+      .eq('status', 'closed')
+      .single();
+
+    if (!fd) { res.status(404).json({ error: 'Closed fixed deposit not found' }); return; }
+
+    if (req.user?.role !== 'owner' && fd.branch_id !== req.user?.branch_id) {
+      res.status(403).json({ error: 'Access denied' }); return;
+    }
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=FD-Early-Closure-${fd.fd_code}.pdf`);
+    doc.pipe(res);
+
+    // Company Header
+    doc.fontSize(18).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });
+    doc.text(`Mobile: ${settings.company_phone}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.fontSize(14).font('Helvetica-Bold').text('EARLY FIXED DEPOSIT CLOSURE CERTIFICATE', { align: 'center' });
+    doc.moveDown(2);
+
+    // Declaration
+    doc.fontSize(11).font('Helvetica').text('This certificate confirms that the customer has requested early closure of the Fixed Deposit prior to the scheduled maturity date. Applicable penalties and interest adjustments have been applied according to company policies. The final settlement amount stated below has been paid to the customer in full.');
+    doc.moveDown(1.5);
+
+    const startX = 60;
+    let currY = doc.y;
+    doc.rect(startX - 10, currY, doc.page.width - 120, 260).stroke('#cccccc');
+    currY += 15;
+
+    doc.font('Helvetica-Bold').fontSize(10).text('Certificate Number:', startX, currY);
+    doc.font('Helvetica').text(fd.fd_code, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Customer Name:', startX, currY);
+    doc.font('Helvetica').text(fd.customers.full_name, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('NIC Number:', startX, currY);
+    doc.font('Helvetica').text(fd.customers.nic_number, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Original Deposit Amount:', startX, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${Number(fd.principal_amount).toLocaleString()}`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Interest Rate:', startX, currY);
+    doc.font('Helvetica').text(`${fd.interest_rate}% p.a.`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('FD Start Date:', startX, currY);
+    doc.font('Helvetica').text(new Date(fd.created_at).toLocaleDateString(), startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Scheduled Maturity Date:', startX, currY);
+    doc.font('Helvetica').text(new Date(fd.maturity_date).toLocaleDateString(), startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Closure Date:', startX, currY);
+    doc.font('Helvetica').text(new Date(fd.closed_at || new Date().toISOString()).toLocaleDateString(), startX + 160, currY);
+
+    const interestEarned = Number(fd.payout_amount || fd.total_maturity_amount) - Number(fd.principal_amount);
+    const penalty = Number(fd.total_maturity_amount) - Number(fd.payout_amount || fd.total_maturity_amount);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Interest Earned:', startX, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${Math.max(0, interestEarned).toLocaleString()}`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Penalty Amount:', startX, currY);
+    doc.font('Helvetica').fillColor(penalty > 0 ? '#dc2626' : '#000000').text(`${settings.currency_symbol} ${penalty > 0 ? penalty.toLocaleString() : '0.00'}`, startX + 160, currY);
+    doc.fillColor('#000000');
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Final Amount Paid:', startX, currY);
+    doc.font('Helvetica').fillColor('#166534').text(`${settings.currency_symbol} ${Number(fd.payout_amount || fd.total_maturity_amount).toLocaleString()}`, startX + 160, currY);
+    doc.fillColor('#000000');
+
+    doc.moveDown(10);
+
+    // Signatures
+    const sigY = doc.page.height - 180;
+    doc.fontSize(10);
+
+    doc.text('_____________________', startX, sigY);
+    doc.text('Customer Signature', startX, sigY + 18);
+    doc.text('Name: _________________', startX, sigY + 32);
+    doc.text('Date: _________________', startX, sigY + 46);
+
+    doc.text('_____________________', doc.page.width - 220, sigY);
+    doc.text('Owner / Authorized Officer', doc.page.width - 220, sigY + 18);
+    doc.text('Name: _________________', doc.page.width - 220, sigY + 32);
+    doc.text('Date: _________________', doc.page.width - 220, sigY + 46);
+
+    doc.rect(doc.page.width - 180, sigY + 60, 120, 60).stroke('#cccccc');
+    doc.fontSize(9).text('Company Seal', doc.page.width - 175, sigY + 75, { align: 'center' });
+
+    doc.end();
+  } catch (err) {
+    console.error('Early Closure Certificate Error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to generate certificate' });
+  }
+});
+
+// GET /api/fixed-deposits/:id/maturity-closure-certificate
+router.get('/:id/maturity-closure-certificate', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { data: fd } = await supabase
+      .from('fixed_deposits')
+      .select('*, customers(full_name, nic_number, address)')
+      .eq('id', req.params.id)
+      .eq('status', 'closed')
+      .single();
+
+    if (!fd) { res.status(404).json({ error: 'Closed fixed deposit not found' }); return; }
+
+    if (req.user?.role !== 'owner' && fd.branch_id !== req.user?.branch_id) {
+      res.status(403).json({ error: 'Access denied' }); return;
+    }
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=FD-Maturity-${fd.fd_code}.pdf`);
+    doc.pipe(res);
+
+    // Company Header
+    doc.fontSize(18).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });
+    doc.text(`Mobile: ${settings.company_phone}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.fontSize(14).font('Helvetica-Bold').text('FIXED DEPOSIT MATURITY SETTLEMENT CERTIFICATE', { align: 'center' });
+    doc.moveDown(2);
+
+    doc.fontSize(11).text('This certificate confirms that the Fixed Deposit investment has successfully completed its full term and the maturity proceeds have been settled to the customer. The customer has received the full maturity value as agreed at the commencement of the Fixed Deposit.');
+    doc.moveDown(1.5);
+
+    const startX = 60;
+    let currY = doc.y;
+    doc.rect(startX - 10, currY, doc.page.width - 120, 220).stroke('#cccccc');
+    currY += 15;
+
+    doc.font('Helvetica-Bold').fontSize(10).text('Certificate Number:', startX, currY);
+    doc.font('Helvetica').text(fd.fd_code, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Customer Name:', startX, currY);
+    doc.font('Helvetica').text(fd.customers.full_name, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('NIC Number:', startX, currY);
+    doc.font('Helvetica').text(fd.customers.nic_number, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Deposit Amount:', startX, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${Number(fd.principal_amount).toLocaleString()}`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Interest Rate:', startX, currY);
+    doc.font('Helvetica').text(`${fd.interest_rate}% p.a.`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Deposit Date:', startX, currY);
+    doc.font('Helvetica').text(new Date(fd.created_at).toLocaleDateString(), startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Maturity Date:', startX, currY);
+    doc.font('Helvetica').text(new Date(fd.maturity_date).toLocaleDateString(), startX + 160, currY);
+
+    const totalInterest = Number(fd.total_maturity_amount) - Number(fd.principal_amount);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Total Interest Earned:', startX, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${totalInterest.toLocaleString()}`, startX + 160, currY);
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Total Maturity Amount Paid:', startX, currY);
+    doc.font('Helvetica').fillColor('#166534').text(`${settings.currency_symbol} ${Number(fd.total_maturity_amount).toLocaleString()}`, startX + 160, currY);
+    doc.fillColor('#000000');
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Settlement Date:', startX, currY);
+    doc.font('Helvetica').text(new Date().toLocaleDateString(), startX + 160, currY);
+
+    doc.moveDown(10);
+
+    // Signatures
+    const sigY = doc.page.height - 180;
+    doc.fontSize(10);
+
+    doc.text('_____________________', startX, sigY);
+    doc.text('Customer Signature', startX, sigY + 18);
+    doc.text('Name: _________________', startX, sigY + 32);
+    doc.text('Date: _________________', startX, sigY + 46);
+
+    doc.text('_____________________', doc.page.width - 220, sigY);
+    doc.text('Owner / Authorized Officer', doc.page.width - 220, sigY + 18);
+    doc.text('Name: _________________', doc.page.width - 220, sigY + 32);
+    doc.text('Date: _________________', doc.page.width - 220, sigY + 46);
+
+    doc.rect(doc.page.width - 180, sigY + 60, 120, 60).stroke('#cccccc');
+    doc.fontSize(9).text('Company Seal', doc.page.width - 175, sigY + 75, { align: 'center' });
+
+    doc.end();
+  } catch (err) {
+    console.error('Maturity Certificate Error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to generate certificate' });
+  }
+});
+
 export default router;

@@ -94,21 +94,6 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
                 res.status(400).json({ error: 'Loan is already fully paid' });
                 return;
             }
-            const today = (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
-            const { data: dueSchedule, error: scheduleError } = await supabase_1.supabase
-                .from('loan_schedule')
-                .select('*')
-                .eq('loan_id', body.loan_id)
-                .eq('due_date', today)
-                .in('status', ['pending', 'partial']);
-            if (scheduleError) {
-                res.status(500).json({ error: 'Failed to validate due schedule' });
-                return;
-            }
-            if (!dueSchedule || dueSchedule.length === 0) {
-                res.status(400).json({ error: 'Payments are only allowed for loans due today' });
-                return;
-            }
             if (body.amount > loan.remaining_balance + 1) {
                 res.status(400).json({ error: `Amount exceeds remaining balance` });
                 return;

@@ -36,17 +36,17 @@ router.get('/summary', async (req, res) => {
     const { count: pendingAssignments } = await pendingAssignmentsQuery;
     let pendingCollectionsQuery = supabase_1.supabase
         .from('loan_payments')
-        .select('*', { count: 'exact', head: true })
+        .select('*, loans!inner(branch_id)', { count: 'exact', head: true })
         .eq('approval_status', 'pending_admin');
     if (user.role !== 'owner')
-        pendingCollectionsQuery = pendingCollectionsQuery.eq('branch_id', user.branch_id);
+        pendingCollectionsQuery = pendingCollectionsQuery.eq('loans.branch_id', user.branch_id);
     const { count: pendingCollections } = await pendingCollectionsQuery;
     let pendingSavingsQuery = supabase_1.supabase
         .from('savings_transactions')
-        .select('*', { count: 'exact', head: true })
+        .select('*, savings_accounts!inner(branch_id)', { count: 'exact', head: true })
         .eq('approval_status', 'pending_admin');
     if (user.role !== 'owner')
-        pendingSavingsQuery = pendingSavingsQuery.eq('branch_id', user.branch_id);
+        pendingSavingsQuery = pendingSavingsQuery.eq('savings_accounts.branch_id', user.branch_id);
     const { count: pendingSavings } = await pendingSavingsQuery;
     let pendingCorrectionsQuery = supabase_1.supabase
         .from('collection_correction_requests')

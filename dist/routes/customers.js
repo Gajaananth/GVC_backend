@@ -119,6 +119,90 @@ const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 }
 });
+// POST /api/customers/fd - Create a Fixed Deposit customer (no face photo needed)
+router.post('/fd', auth_1.requireCustomerAdmin, upload.fields([
+    { name: 'nic_front', maxCount: 1 },
+    { name: 'nic_back', maxCount: 1 }
+]), async (req, res) => {
+    try {
+        const files = req.files;
+        if (!files?.nic_front?.[0] || !files?.nic_back?.[0]) {
+            res.status(400).json({ error: 'Missing required NIC images. NIC Front and NIC Back are mandatory for FD customers.' });
+            return;
+        }
+        const schemaWithoutUrls = customerSchema.omit({
+            photo_url: true, nic_front_url: true, nic_back_url: true,
+            home_photo_url: true, shop_photo_url: true, application_form_url: true
+        });
+        const parsedBody = {
+            ...req.body,
+            monthly_income: req.body.monthly_income ? Number(req.body.monthly_income) : undefined
+        };
+        const body = schemaWithoutUrls.parse(parsedBody);
+        const branchId = req.user?.role === 'owner' ? body.branch_id : req.user.branch_id;
+        if (!branchId) {
+            res.status(400).json({ error: 'Branch selection is required' });
+            return;
+        }
+        const { registered_by_staff_id, assigned_staff_id, ...customerFields } = body;
+        const staffId = assigned_staff_id || registered_by_staff_id;
+        const { data: customer, error: insertError } = await supabase_1.supabase
+            .from('customers')
+            .insert({
+            ...customerFields,
+            registered_by_staff_id: registered_by_staff_id || staffId || null,
+            assigned_staff_id: staffId || null,
+            branch_id: branchId,
+            created_by: req.user.id,
+            photo_url: 'none', // Not required for FD
+            nic_front_url: 'pending',
+            nic_back_url: 'pending'
+        })
+            .select()
+            .single();
+        if (insertError) {
+            if (insertError.code === '23505')
+                res.status(409).json({ error: 'NIC number already exists' });
+            else
+                res.status(500).json({ error: insertError.message });
+            return;
+        }
+        try {
+            const nicFrontUpload = await (0, storage_1.uploadCustomerFile)(customer.id, 'nic_front', files.nic_front[0]);
+            const nicBackUpload = await (0, storage_1.uploadCustomerFile)(customer.id, 'nic_back', files.nic_back[0]);
+            const { data: updatedCustomer, error: updateError } = await supabase_1.supabase
+                .from('customers')
+                .update({
+                nic_front_url: nicFrontUpload.url,
+                nic_back_url: nicBackUpload.url,
+            })
+                .eq('id', customer.id)
+                .select()
+                .single();
+            if (updateError)
+                throw updateError;
+            await supabase_1.supabase.from('activity_logs').insert({
+                user_id: req.user.id, user_name: req.user.full_name, user_role: req.user.role,
+                action: 'CREATE', entity_type: 'customer',
+                entity_id: customer.id, entity_code: customer.customer_code,
+                branch_id: req.user.branch_id,
+                description: `Created FD customer: ${customer.full_name}`
+            });
+            res.status(201).json({ data: updatedCustomer, message: 'FD Customer created successfully' });
+        }
+        catch (uploadErr) {
+            await supabase_1.supabase.from('customers').delete().eq('id', customer.id);
+            throw new Error(`Failed to upload NIC images: ${uploadErr instanceof Error ? uploadErr.message : 'Unknown error'}`);
+        }
+    }
+    catch (err) {
+        if (err instanceof zod_1.z.ZodError) {
+            res.status(400).json({ error: 'Validation error', details: err.errors });
+            return;
+        }
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to create FD customer' });
+    }
+});
 // POST /api/customers — admin/owner only (staff cannot create)
 router.post('/', auth_1.requireCustomerAdmin, upload.fields([
     { name: 'photo', maxCount: 1 },
