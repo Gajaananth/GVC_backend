@@ -463,11 +463,6 @@ router.post('/:id/unblock', requireAdmin, async (req: AuthRequest, res: Response
   res.json({ data, message: 'Fixed deposit unblocked successfully' });
 });
 
-import PDFDocument from 'pdfkit';
-import fs from 'fs';
-import path from 'path';
-import { getCompanySettings, addStandardHeader } from '../utils/pdfTableGenerator';
-
 // GET /api/fixed-deposits/:id/certificate
 router.get('/:id/certificate', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
