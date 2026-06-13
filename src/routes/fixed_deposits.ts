@@ -17,7 +17,11 @@ const createFDSchema = z.object({
 
 // GET /api/fixed-deposits
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
-  const { status, customer_id, branch_id } = req.query;
+  const { status, customer_id, branch_id, search, page = '1', limit = '10' } = req.query;
+  
+  const pageNum = parseInt(page as string, 10);
+  const limitNum = parseInt(limit as string, 10);
+  const offset = (pageNum - 1) * limitNum;
 
   let query = supabase
     .from('fixed_deposits')
@@ -25,8 +29,9 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       *,
       customers(id, full_name, customer_code, nic_number),
       branches(id, branch_name)
-    `)
-    .order('created_at', { ascending: false });
+    `, { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limitNum - 1);
 
   if (status) query = query.eq('status', status);
   if (customer_id) query = query.eq('customer_id', customer_id);
@@ -38,9 +43,21 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     query = query.eq('branch_id', branch_id);
   }
 
-  const { data, error } = await query;
+  if (search) {
+    const safeSearch = (search as string).replace(/"/g, '');
+    query = query.ilike('fd_code', `%${safeSearch}%`);
+  }
+
+  const { data, error, count } = await query;
   if (error) { res.status(500).json({ error: error.message }); return; }
-  res.json({ data });
+  
+  res.json({ 
+    data, 
+    total: count, 
+    page: pageNum, 
+    limit: limitNum, 
+    totalPages: Math.ceil((count || 0) / limitNum) 
+  });
 });
 
 // GET /api/fixed-deposits/:id
