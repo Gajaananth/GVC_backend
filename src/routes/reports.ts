@@ -32,12 +32,12 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       case 'daily_collection': {
         let query = supabase
           .from('loan_payments')
-          .select(`payment_code, payment_date, amount, payment_type, payment_method, loans(loan_code), customers(full_name, customer_code, phone)`)
+          .select(`payment_code, payment_date, amount, payment_type, payment_method, loans!inner(loan_code, branch_id), customers(full_name, customer_code, phone)`)
           .gte('payment_date', sDate)
           .lte('payment_date', eDate)
           .order('payment_date', { ascending: false });
 
-        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        if (req.user?.role !== 'owner') query = query.eq('loans.branch_id', req.user?.branch_id);
 
         const { data } = await query;
         const total = (data || []).reduce((sum: number, p: any) => sum + p.amount, 0);
@@ -48,10 +48,10 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       case 'monthly_finance': {
         let paymentsQuery = supabase
           .from('loan_payments')
-          .select('amount, payment_date, payment_type')
+          .select('amount, payment_date, payment_type, loans!inner(branch_id)')
           .gte('payment_date', sDate)
           .lte('payment_date', eDate);
-        if (req.user?.role !== 'owner') paymentsQuery = paymentsQuery.eq('branch_id', req.user?.branch_id);
+        if (req.user?.role !== 'owner') paymentsQuery = paymentsQuery.eq('loans.branch_id', req.user?.branch_id);
         const { data: payments } = await paymentsQuery;
 
         let newLoansQuery = supabase
@@ -64,10 +64,10 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
 
         let savingsQuery = supabase
           .from('savings_transactions')
-          .select('amount, transaction_type, transaction_date')
+          .select('amount, transaction_type, transaction_date, savings_accounts!inner(branch_id)')
           .gte('transaction_date', sDate)
           .lte('transaction_date', eDate);
-        if (req.user?.role !== 'owner') savingsQuery = savingsQuery.eq('branch_id', req.user?.branch_id);
+        if (req.user?.role !== 'owner') savingsQuery = savingsQuery.eq('savings_accounts.branch_id', req.user?.branch_id);
         const { data: savings } = await savingsQuery;
 
         const totalCollections = (payments || []).reduce((s: number, p: any) => s + p.amount, 0);
@@ -156,10 +156,10 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       case 'income': {
         let query = supabase
           .from('loan_payments')
-          .select('amount, interest_paid, payment_date, payment_method')
+          .select('amount, interest_paid, payment_date, payment_method, loans!inner(branch_id)')
           .gte('payment_date', sDate)
           .lte('payment_date', eDate);
-        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        if (req.user?.role !== 'owner') query = query.eq('loans.branch_id', req.user?.branch_id);
         const { data: payments } = await query;
 
         const totalIncome = (payments || []).reduce((s: number, p: any) => s + (p.interest_paid || 0), 0);
@@ -200,6 +200,7 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
   const { start_date, end_date } = req.query;
   const sDate = (start_date as string) || format(startOfMonth(new Date()), 'yyyy-MM-dd');
   const eDate = (end_date as string) || format(endOfMonth(new Date()), 'yyyy-MM-dd');
+  const endOfDayDate = `${eDate} 23:59:59`;
 
   try {
     if (!req.user) {
@@ -217,8 +218,8 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
       const worksheet = workbook.addWorksheet('Report');
 
       if (type === 'daily_collection') {
-        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name)`).gte('payment_date', sDate).lte('payment_date', eDate);
-        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans!inner(branch_id)`).gte('payment_date', sDate).lte('payment_date', endOfDayDate);
+        if (req.user?.role !== 'owner') query = query.eq('loans.branch_id', req.user?.branch_id);
         const { data } = await query;
         worksheet.columns = [
           { header: 'Receipt', key: 'payment_code', width: 20 },
@@ -268,6 +269,10 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
          worksheet.addRow(['Export data available in JSON format, basic Excel provided']);
       }
 
+      worksheet.addRow([]);
+      worksheet.addRow(['Generated on:', new Date().toLocaleString()]);
+      worksheet.addRow(['Downloaded on:', new Date().toLocaleString()]);
+
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename=${type}-${sDate}-to-${eDate}.xlsx`);
       await workbook.xlsx.write(res);
@@ -287,8 +292,8 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
       let rows: any[] = [];
 
       if (type === 'daily_collection') {
-        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans(loan_code)`).gte('payment_date', sDate).lte('payment_date', eDate);
-        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans!inner(loan_code, branch_id)`).gte('payment_date', sDate).lte('payment_date', endOfDayDate);
+        if (req.user?.role !== 'owner') query = query.eq('loans.branch_id', req.user?.branch_id);
         const { data } = await query;
         columns = [
           { header: 'Receipt', key: 'payment_code', width: 100 },

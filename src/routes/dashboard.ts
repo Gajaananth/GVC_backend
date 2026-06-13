@@ -33,16 +33,16 @@ router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> =>
 
   let pendingCollectionsQuery = supabase
     .from('loan_payments')
-    .select('*', { count: 'exact', head: true })
+    .select('*, loans!inner(branch_id)', { count: 'exact', head: true })
     .eq('approval_status', 'pending_admin');
-  if (user.role !== 'owner') pendingCollectionsQuery = pendingCollectionsQuery.eq('branch_id', user.branch_id);
+  if (user.role !== 'owner') pendingCollectionsQuery = pendingCollectionsQuery.eq('loans.branch_id', user.branch_id);
   const { count: pendingCollections } = await pendingCollectionsQuery;
 
   let pendingSavingsQuery = supabase
     .from('savings_transactions')
-    .select('*', { count: 'exact', head: true })
+    .select('*, savings_accounts!inner(branch_id)', { count: 'exact', head: true })
     .eq('approval_status', 'pending_admin');
-  if (user.role !== 'owner') pendingSavingsQuery = pendingSavingsQuery.eq('branch_id', user.branch_id);
+  if (user.role !== 'owner') pendingSavingsQuery = pendingSavingsQuery.eq('savings_accounts.branch_id', user.branch_id);
   const { count: pendingSavings } = await pendingSavingsQuery;
 
   let pendingCorrectionsQuery = supabase
