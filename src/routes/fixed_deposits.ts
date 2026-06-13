@@ -1,7 +1,9 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import PDFDocument from 'pdfkit';
 import { supabase } from '../config/supabase';
 import { authenticateJWT, requireAdmin, requireOwner, AuthRequest } from '../middleware/auth';
+import { getCompanySettings, addStandardHeader } from '../utils/pdfTableGenerator';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -236,15 +238,22 @@ router.post('/:id/close', requireAdmin, async (req: AuthRequest, res: Response):
     return;
   }
 
-  const payout_amount = req.body.payout_amount;
-  const reason = req.body.notes;
+  const payout_amount = req.body.payout_amount != null ? Number(req.body.payout_amount) : Number(fd.total_maturity_amount);
+  const reason = req.body.notes || 'Maturity/Early Withdrawal';
+  const closed_at = new Date().toISOString();
 
   let newNotes = fd.notes ? fd.notes + '\n' : '';
-  newNotes += `[CLOSED] Payout Amount: ${payout_amount || fd.total_maturity_amount}. Reason: ${reason || 'Maturity/Early Withdrawal'}`;
+  newNotes += `[CLOSED] Payout Amount: ${payout_amount}. Reason: ${reason}`;
 
   const { data, error } = await supabase
     .from('fixed_deposits')
-    .update({ status: 'closed', notes: newNotes })
+    .update({
+      status: 'closed',
+      payout_amount,
+      closure_reason: reason,
+      closed_at,
+      notes: newNotes
+    })
     .eq('id', req.params.id)
     .select()
     .single();
@@ -265,6 +274,195 @@ router.post('/:id/close', requireAdmin, async (req: AuthRequest, res: Response):
   res.json({ data, message: 'Fixed deposit closed successfully' });
 });
 
+// GET /api/fixed-deposits/:id/closure-certificate
+router.get('/:id/closure-certificate', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { data: fd } = await supabase
+      .from('fixed_deposits')
+      .select('*, customers(full_name, nic_number, address)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (!fd) { res.status(404).json({ error: 'Fixed deposit not found' }); return; }
+
+    if (fd.status !== 'closed') {
+      res.status(400).json({ error: 'Closure certificate can only be generated for closed fixed deposits' });
+      return;
+    }
+
+    if (req.user?.role !== 'owner' && fd.branch_id !== req.user?.branch_id) {
+      res.status(403).json({ error: 'Access denied to this closure certificate' });
+      return;
+    }
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=FD-Closure-Certificate-${fd.fd_code}.pdf`);
+    doc.pipe(res);
+
+    addStandardHeader(doc, 'FIXED DEPOSIT CLOSURE CERTIFICATE', settings);
+    doc.moveDown(2);
+
+    doc.fontSize(12).font('Helvetica').fillColor('#000000');
+    doc.text(`This is to certify that `, { continued: true });
+    doc.font('Helvetica-Bold').text(fd.customers.full_name, { continued: true });
+    doc.font('Helvetica').text(` (NIC: ${fd.customers.nic_number})`);
+    doc.text(`residing at ${fd.customers.address || '___________________________'}`);
+
+    doc.moveDown(1);
+    doc.text(`Has closed the fixed deposit with us under the following details:`);
+    doc.moveDown(1);
+
+    const startX = 50;
+    let currY = doc.y;
+    const boxHeight = 240;
+    doc.rect(startX, currY, doc.page.width - 100, boxHeight).stroke('#cccccc');
+
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Certificate No:', startX + 20, currY);
+    doc.font('Helvetica').text(fd.fd_code, startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Deposit Date:', startX + 20, currY);
+    doc.font('Helvetica').text(new Date(fd.created_at).toLocaleDateString(), startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Closure Date:', startX + 20, currY);
+    doc.font('Helvetica').text(new Date(fd.closed_at || new Date().toISOString()).toLocaleDateString(), startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Term (Months):', startX + 20, currY);
+    doc.font('Helvetica').text(`${fd.term_months} Months`, startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Interest Rate:', startX + 20, currY);
+    doc.font('Helvetica').text(`${fd.interest_rate}% p.a.`, startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Maturity Date:', startX + 20, currY);
+    doc.font('Helvetica').text(new Date(fd.maturity_date).toLocaleDateString(), startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Original Maturity Value:', startX + 20, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${Number(fd.total_maturity_amount).toLocaleString()}`, startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Actual Payout Amount:', startX + 20, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${Number(fd.payout_amount || fd.total_maturity_amount).toLocaleString()}`, startX + 170, currY);
+
+    const penalty = Number(fd.total_maturity_amount) - Number(fd.payout_amount || fd.total_maturity_amount);
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Early Closure Penalty:', startX + 20, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${penalty > 0 ? penalty.toLocaleString() : '0.00'}`, startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Payout Method:', startX + 20, currY);
+    doc.font('Helvetica').text(fd.payout_method.replace('_', ' '), startX + 170, currY);
+
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Closure Reason:', startX + 20, currY);
+    doc.font('Helvetica').text(fd.closure_reason || 'Maturity/Early Withdrawal', startX + 170, currY, { width: doc.page.width - 260 });
+
+    doc.y = currY + 45;
+    doc.moveDown(2);
+
+    const sigY = doc.page.height - 150;
+    doc.font('Helvetica').text('_________________________', 60, sigY);
+    doc.text('Authorized Signature (Owner)', 60, sigY + 18);
+
+    doc.text('_________________________', doc.page.width - 260, sigY);
+    doc.text('Customer Signature', doc.page.width - 260, sigY + 18);
+
+    doc.end();
+  } catch (err) {
+    console.error('Closure PDF Generation Error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to generate closure PDF' });
+  }
+});
+
+// POST /api/fixed-deposits/:id/block
+router.post('/:id/block', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { reason } = req.body;
+  
+  const { data: fd } = await supabase
+    .from('fixed_deposits')
+    .select('*')
+    .eq('id', req.params.id)
+    .single();
+
+  if (!fd) {
+    res.status(404).json({ error: 'Fixed deposit not found' });
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('fixed_deposits')
+    .update({
+      is_blocked: true,
+      block_reason: reason || 'Blocked by admin'
+    })
+    .eq('id', req.params.id)
+    .select()
+    .single();
+
+  if (error) { res.status(500).json({ error: error.message }); return; }
+
+  await supabase.from('activity_logs').insert({
+    user_id: req.user!.id,
+    user_name: req.user!.full_name,
+    user_role: req.user!.role,
+    action: 'UPDATE',
+    entity_type: 'fixed_deposit',
+    entity_id: data.id,
+    entity_code: data.fd_code,
+    description: `Blocked fixed deposit ${data.fd_code}. Reason: ${reason || 'Blocked by admin'}`
+  });
+
+  res.json({ data, message: 'Fixed deposit blocked successfully' });
+});
+
+// POST /api/fixed-deposits/:id/unblock
+router.post('/:id/unblock', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { data: fd } = await supabase
+    .from('fixed_deposits')
+    .select('*')
+    .eq('id', req.params.id)
+    .eq('is_blocked', true)
+    .single();
+
+  if (!fd) {
+    res.status(404).json({ error: 'Blocked fixed deposit not found' });
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('fixed_deposits')
+    .update({
+      is_blocked: false,
+      block_reason: null
+    })
+    .eq('id', req.params.id)
+    .select()
+    .single();
+
+  if (error) { res.status(500).json({ error: error.message }); return; }
+
+  await supabase.from('activity_logs').insert({
+    user_id: req.user!.id,
+    user_name: req.user!.full_name,
+    user_role: req.user!.role,
+    action: 'UPDATE',
+    entity_type: 'fixed_deposit',
+    entity_id: data.id,
+    entity_code: data.fd_code,
+    description: `Unblocked fixed deposit ${data.fd_code}`
+  });
+
+  res.json({ data, message: 'Fixed deposit unblocked successfully' });
+});
+
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
@@ -280,6 +478,12 @@ router.get('/:id/certificate', async (req: AuthRequest, res: Response): Promise<
       .single();
 
     if (!fd) { res.status(404).json({ error: 'Fixed deposit not found' }); return; }
+
+    // Authorization check: user must be owner, admin, or belong to the FD's branch
+    if (req.user?.role !== 'owner' && fd.branch_id !== req.user?.branch_id) {
+      res.status(403).json({ error: 'Access denied to this certificate' });
+      return;
+    }
 
     const settings = await getCompanySettings();
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
