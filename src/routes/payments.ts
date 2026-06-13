@@ -55,90 +55,106 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   res.json({ data, total: count, page: pageNum, limit: limitNum, totalPages: Math.ceil((count || 0) / limitNum) });
 });
 
+const batchPaymentSchema = z.array(recordPaymentSchema);
+
 // POST /api/payments — admin/owner only, immediate approval (staff use /api/collections/submit/payment)
 router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const user = req.user;
     if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
 
-    const body = recordPaymentSchema.parse(req.body);
-    const paymentDate = body.payment_date || format(new Date(), 'yyyy-MM-dd');
-    const cashAmount = body.cash_amount ?? (body.payment_method === 'cash' ? body.amount : 0);
-    const onlineAmount = body.online_amount ?? (body.payment_method !== 'cash' ? body.amount : 0);
+    const payments = Array.isArray(req.body)
+      ? batchPaymentSchema.parse(req.body)
+      : [recordPaymentSchema.parse(req.body)];
 
-    const { data: loan } = await supabase
-      .from('loans')
-      .select('*, customers(id, full_name, phone)')
-      .eq('id', body.loan_id)
-      .single();
+    const results: Array<any> = [];
 
-    if (!loan) { res.status(404).json({ error: 'Loan not found' }); return; }
-    if (loan.approval_status !== 'approved' || loan.status === 'pending_approval') {
-      res.status(400).json({ error: 'Payments only on owner-approved loans' });
-      return;
-    }
-    if (loan.is_fully_paid) { res.status(400).json({ error: 'Loan is already fully paid' }); return; }
-    if (body.amount > loan.remaining_balance + 1) {
-      res.status(400).json({ error: `Amount exceeds remaining balance` });
-      return;
-    }
-    if (body.payment_type === 'full_settlement' && Math.abs(body.amount - loan.remaining_balance) > 1) {
-      res.status(400).json({ error: 'Full settlement amount must equal remaining balance' });
-      return;
-    }
+    for (const body of payments) {
+      const paymentDate = body.payment_date || format(new Date(), 'yyyy-MM-dd');
+      const cashAmount = body.cash_amount ?? (body.payment_method === 'cash' ? body.amount : 0);
+      const onlineAmount = body.online_amount ?? (body.payment_method !== 'cash' ? body.amount : 0);
 
-    const { data: payment, error: payError } = await supabase
-      .from('loan_payments')
-      .insert({
-        loan_id: body.loan_id,
-        customer_id: loan.customer_id,
-        branch_id: loan.branch_id,
-        payment_date: paymentDate,
-        amount: body.amount,
-        cash_amount: cashAmount,
-        online_amount: onlineAmount,
-        payment_type: body.payment_type,
-        payment_method: body.payment_method,
-        reference_number: body.reference_number,
-        notes: body.notes,
-        approval_status: 'approved',
-        approved_by: user.id,
-        approved_at: new Date().toISOString(),
-        created_by: user.id
-      })
-      .select()
-      .single();
+      const { data: loan } = await supabase
+        .from('loans')
+        .select('*, customers(id, full_name, phone)')
+        .eq('id', body.loan_id)
+        .single();
 
-    if (payError || !payment) { res.status(500).json({ error: payError?.message }); return; }
+      if (!loan) { res.status(404).json({ error: 'Loan not found' }); return; }
+      if (loan.approval_status !== 'approved' || loan.status === 'pending_approval') {
+        res.status(400).json({ error: 'Payments only on owner-approved loans' });
+        return;
+      }
+      if (loan.is_fully_paid) { res.status(400).json({ error: 'Loan is already fully paid' }); return; }
+      if (body.amount > loan.remaining_balance + 1) {
+        res.status(400).json({ error: `Amount exceeds remaining balance` });
+        return;
+      }
+      if (body.payment_type === 'full_settlement' && Math.abs(body.amount - loan.remaining_balance) > 1) {
+        res.status(400).json({ error: 'Full settlement amount must equal remaining balance' });
+        return;
+      }
 
-    const result = await applyLoanPayment(payment.id, user.id);
-    if (!result.success) {
-      res.status(400).json({ error: result.error });
-      return;
-    }
+      const { data: payment, error: payError } = await supabase
+        .from('loan_payments')
+        .insert({
+          loan_id: body.loan_id,
+          customer_id: loan.customer_id,
+          branch_id: loan.branch_id,
+          payment_date: paymentDate,
+          amount: body.amount,
+          cash_amount: cashAmount,
+          online_amount: onlineAmount,
+          payment_type: body.payment_type,
+          payment_method: body.payment_method,
+          reference_number: body.reference_number,
+          notes: body.notes,
+          approval_status: 'approved',
+          approved_by: user.id,
+          approved_at: new Date().toISOString(),
+          created_by: user.id
+        })
+        .select()
+        .single();
 
-    const { data: updatedLoan } = await supabase.from('loans').select('remaining_balance, is_fully_paid').eq('id', body.loan_id).single();
+      if (payError || !payment) { res.status(500).json({ error: payError?.message }); return; }
 
-    await supabase.from('activity_logs').insert({
-      user_id: user.id, user_name: user.full_name, user_role: user.role,
-      action: 'CREATE', entity_type: 'payment',
-      entity_id: payment.id, entity_code: payment.payment_code,
-      description: `Admin recorded payment ${payment.payment_code}`
-    });
+      const applyResult = await applyLoanPayment(payment.id, user.id);
+      if (!applyResult.success) {
+        res.status(400).json({ error: applyResult.error });
+        return;
+      }
 
-    // Send SMS Receipt
-    if (loan.customers && loan.customers.phone) {
-      const message = `Dear ${loan.customers.full_name}, your payment of LKR ${body.amount} for loan ${loan.loan_code} has been received. Thank you. GVC Agro Finance.`;
-      await sendSMS(loan.customers.phone, message);
+      const { data: updatedLoan } = await supabase.from('loans').select('remaining_balance, is_fully_paid').eq('id', body.loan_id).single();
+
+      await supabase.from('activity_logs').insert({
+        user_id: user.id, user_name: user.full_name, user_role: user.role,
+        action: 'CREATE', entity_type: 'payment',
+        entity_id: payment.id, entity_code: payment.payment_code,
+        description: `Admin recorded payment ${payment.payment_code}`
+      });
+
+      if (loan.customers && loan.customers.phone) {
+        const message = `Dear ${loan.customers.full_name}, your payment of LKR ${body.amount} for loan ${loan.loan_code} has been received. Thank you. GVC Agro Finance.`;
+        await sendSMS(loan.customers.phone, message);
+      }
+
+      results.push({
+        payment,
+        loan_code: loan.loan_code,
+        new_balance: updatedLoan?.remaining_balance,
+        is_fully_paid: updatedLoan?.is_fully_paid
+      });
     }
 
     res.status(201).json({
-      data: { ...payment, loan_code: loan.loan_code, new_balance: updatedLoan?.remaining_balance, is_fully_paid: updatedLoan?.is_fully_paid },
-      message: updatedLoan?.is_fully_paid ? 'Loan fully settled!' : 'Payment recorded'
+      data: results.length === 1 ? results[0] : results,
+      message: payments.length === 1 ? 'Payment recorded' : 'Payments recorded'
     });
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
-    res.status(500).json({ error: 'Failed to record payment' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to record payment(s)' });
   }
 });
 
