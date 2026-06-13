@@ -151,7 +151,6 @@ router.post('/submit/payment', requireStaff, async (req: AuthRequest, res: Respo
       .insert({
         loan_id: body.loan_id,
         customer_id: loan.customer_id,
-        branch_id: req.user!.branch_id,
         payment_date: paymentDate,
         amount: body.amount,
         cash_amount: body.cash_amount,
@@ -925,7 +924,6 @@ router.post('/owner-batch-submit', requireOwner, async (req: AuthRequest, res: R
         .insert({
           loan_id: item.loan_id,
           customer_id: loan.customer_id,
-          branch_id: loan.branch_id,
           payment_date: paymentDate,
           amount: item.amount,
           cash_amount: item.cash_amount,
