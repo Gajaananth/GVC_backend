@@ -101,6 +101,11 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
     const branchId = req.user!.branch_id || req.user!.id; // Owner fallback
 
+    const isOwner = req.user!.role === 'owner';
+    const status = isOwner ? 'active' : 'pending';
+    const approvedBy = isOwner ? req.user!.id : null;
+    const approvedAt = isOwner ? new Date().toISOString() : null;
+
     const { data, error } = await supabase
       .from('fixed_deposits')
       .insert({
@@ -111,11 +116,13 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         interest_rate: body.interest_rate,
         term_months: body.term_months,
         maturity_date: maturityDate.toISOString().split('T')[0],
-        status: 'pending',
+        status: status,
         payout_method: body.payout_method,
         total_maturity_amount: totalMaturityAmount,
         notes: body.notes,
-        created_by: req.user!.id
+        created_by: req.user!.id,
+        approved_by: approvedBy,
+        approved_at: approvedAt
       })
       .select()
       .single();
@@ -130,10 +137,13 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
       entity_type: 'fixed_deposit',
       entity_id: data.id,
       entity_code: data.fd_code,
-      description: 'Created fixed deposit ' + data.fd_code + ' for ' + body.principal_amount
+      description: `Created fixed deposit ${data.fd_code} for ${body.principal_amount}${isOwner ? ' (Auto-approved)' : ''}`
     });
 
-    res.status(201).json({ data, message: 'Fixed deposit created and awaiting approval' });
+    res.status(201).json({ 
+      data, 
+      message: isOwner ? 'Fixed deposit created successfully' : 'Fixed deposit created and awaiting approval' 
+    });
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
     res.status(500).json({ error: 'Failed to create fixed deposit' });
