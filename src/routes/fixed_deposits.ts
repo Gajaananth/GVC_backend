@@ -99,7 +99,19 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const t = body.term_months / 12;
     const totalMaturityAmount = body.principal_amount * (1 + r * t);
 
-    const branchId = req.user!.branch_id || req.user!.id; // Owner fallback
+    // Fetch the customer to get their branch_id
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('branch_id')
+      .eq('id', body.customer_id)
+      .single();
+
+    if (!customer) {
+      res.status(404).json({ error: 'Customer not found' });
+      return;
+    }
+
+    const branchId = customer.branch_id;
 
     const isOwner = req.user!.role === 'owner';
     const status = isOwner ? 'active' : 'pending';
@@ -224,9 +236,15 @@ router.post('/:id/close', requireAdmin, async (req: AuthRequest, res: Response):
     return;
   }
 
+  const payout_amount = req.body.payout_amount;
+  const reason = req.body.notes;
+
+  let newNotes = fd.notes ? fd.notes + '\n' : '';
+  newNotes += `[CLOSED] Payout Amount: ${payout_amount || fd.total_maturity_amount}. Reason: ${reason || 'Maturity/Early Withdrawal'}`;
+
   const { data, error } = await supabase
     .from('fixed_deposits')
-    .update({ status: 'closed' })
+    .update({ status: 'closed', notes: newNotes })
     .eq('id', req.params.id)
     .select()
     .single();
@@ -245,6 +263,94 @@ router.post('/:id/close', requireAdmin, async (req: AuthRequest, res: Response):
   });
 
   res.json({ data, message: 'Fixed deposit closed successfully' });
+});
+
+import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
+import { getCompanySettings, addStandardHeader } from '../utils/pdfTableGenerator';
+
+// GET /api/fixed-deposits/:id/certificate
+router.get('/:id/certificate', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { data: fd } = await supabase
+      .from('fixed_deposits')
+      .select('*, customers(full_name, nic_number, address)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (!fd) { res.status(404).json({ error: 'Fixed deposit not found' }); return; }
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=FD-Certificate-${fd.fd_code}.pdf`);
+    doc.pipe(res);
+
+    addStandardHeader(doc, 'FIXED DEPOSIT CERTIFICATE', settings);
+
+    doc.moveDown(2);
+    
+    // Certificate Content
+    doc.fontSize(12).font('Helvetica').fillColor('#000000');
+    doc.text(`This is to certify that `, { continued: true });
+    doc.font('Helvetica-Bold').text(fd.customers.full_name, { continued: true });
+    doc.font('Helvetica').text(` (NIC: ${fd.customers.nic_number})`);
+    doc.text(`residing at ${fd.customers.address || '___________________________'}`);
+    
+    doc.moveDown(1);
+    doc.text(`Has deposited the sum of `, { continued: true });
+    doc.font('Helvetica-Bold').text(`${settings.currency_symbol} ${Number(fd.principal_amount).toLocaleString()}`, { continued: true });
+    doc.font('Helvetica').text(` as a Fixed Deposit with us.`);
+    
+    doc.moveDown(1.5);
+    
+    // Details Box
+    const startX = 50;
+    let currY = doc.y;
+    doc.rect(startX, currY, doc.page.width - 100, 160).stroke('#cccccc');
+    
+    currY += 20;
+    doc.font('Helvetica-Bold').text('Certificate No:', startX + 20, currY);
+    doc.font('Helvetica').text(fd.fd_code, startX + 150, currY);
+    
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Deposit Date:', startX + 20, currY);
+    doc.font('Helvetica').text(new Date(fd.created_at).toLocaleDateString(), startX + 150, currY);
+    
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Term (Months):', startX + 20, currY);
+    doc.font('Helvetica').text(`${fd.term_months} Months`, startX + 150, currY);
+    
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Interest Rate:', startX + 20, currY);
+    doc.font('Helvetica').text(`${fd.interest_rate}% p.a.`, startX + 150, currY);
+    
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Maturity Date:', startX + 20, currY);
+    doc.font('Helvetica').text(new Date(fd.maturity_date).toLocaleDateString(), startX + 150, currY);
+    
+    currY += 25;
+    doc.font('Helvetica-Bold').text('Maturity Value:', startX + 20, currY);
+    doc.font('Helvetica').text(`${settings.currency_symbol} ${Number(fd.total_maturity_amount).toLocaleString()}`, startX + 150, currY);
+    
+    doc.y = currY + 40;
+    doc.moveDown(2);
+    
+    // Signatures
+    const sigY = doc.page.height - 150;
+    doc.font('Helvetica').text('_________________________', 50, sigY);
+    doc.text('Authorized Signature (Owner)', 50, sigY + 15);
+    
+    doc.text('_________________________', doc.page.width - 250, sigY);
+    doc.text('Customer Signature', doc.page.width - 250, sigY + 15);
+
+    doc.end();
+  } catch (err) {
+    console.error('PDF Generation Error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to generate PDF' });
+  }
 });
 
 export default router;
