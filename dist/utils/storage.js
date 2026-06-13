@@ -8,7 +8,6 @@ exports.uploadCustomerFile = uploadCustomerFile;
 const supabase_1 = require("../config/supabase");
 const uuid_1 = require("uuid");
 const path_1 = __importDefault(require("path"));
-const sharp_1 = __importDefault(require("sharp"));
 const BUCKET = process.env.STORAGE_BUCKET || 'gvc-finance-files';
 const ALLOWED_MIME = new Set([
     'image/jpeg',
@@ -24,13 +23,10 @@ async function uploadCustomerFile(customerId, documentType, file) {
     if (file.size > MAX_BYTES) {
         throw new Error('File size must be under 10MB');
     }
-    // Validate image dimensions for face photo (minimum 300x300)
+    // Validate image dimensions for face photo
     if (documentType === 'photo') {
-        const metadata = await (0, sharp_1.default)(file.buffer).metadata();
-        if (!metadata.width || !metadata.height || metadata.width < 300 || metadata.height < 300) {
-            throw new Error('Face photo must be at least 300x300 pixels');
-        }
-        // NOTE: Advanced face detection could be added here.
+        // We removed the 300x300 constraint per user request. 
+        // The AI face detection will still run to verify a face is present.
     }
     const ext = path_1.default.extname(file.originalname) || (file.mimetype === 'application/pdf' ? '.pdf' : '.jpg');
     const storagePath = `customers/${customerId}/${documentType}/${(0, uuid_1.v4)()}${ext}`;

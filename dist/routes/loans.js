@@ -233,8 +233,7 @@ router.post('/', auth_1.requireAdmin, loanUpload.single('loan_application_pdf'),
         const loanBranchId = customer.branch_id;
         const creatorRole = req.user?.role;
         const isOwnerCreation = creatorRole === 'owner';
-        const isBranchManagerCreation = creatorRole === 'branch_manager';
-        const approvalStatus = isOwnerCreation ? 'approved' : isBranchManagerCreation ? 'pending_approval' : 'pending_manager_review';
+        const approvalStatus = isOwnerCreation ? 'approved' : 'pending_approval';
         const status = isOwnerCreation ? 'active' : 'pending_approval';
         for (const staffId of [body.applied_by, body.in_charge_user_id]) {
             const { data: staff } = await supabase_1.supabase
@@ -242,11 +241,11 @@ router.post('/', auth_1.requireAdmin, loanUpload.single('loan_application_pdf'),
                 .select('id, role, is_active, branch_id')
                 .eq('id', staffId)
                 .single();
-            if (!staff || !staff.is_active || !['staff', 'admin', 'branch_manager', 'cashier'].includes(staff.role)) {
-                res.status(400).json({ error: 'Applied-by and in-charge must be active staff, branch manager, cashier, or admin users' });
+            if (!staff || !staff.is_active || !['staff', 'admin', 'branch_manager', 'cashier', 'owner'].includes(staff.role)) {
+                res.status(400).json({ error: 'Applied-by and in-charge must be active staff, branch manager, cashier, admin, or owner users' });
                 return;
             }
-            if (staff.branch_id !== customer.branch_id) {
+            if (staff.role !== 'owner' && staff.branch_id !== customer.branch_id) {
                 res.status(400).json({ error: 'Assigned user must belong to the same branch as the customer' });
                 return;
             }
@@ -404,7 +403,9 @@ router.post('/', auth_1.requireAdmin, loanUpload.single('loan_application_pdf'),
         });
         res.status(201).json({
             data: { ...loan, loan_form_url: loanFormUrl, loan_application_url: loanApplicationUrl, preview: calc },
-            message: 'Loan submitted for owner approval. Schedule is created when owner approves on credit date.'
+            message: isOwnerCreation
+                ? 'Loan created successfully and schedule generated.'
+                : 'Loan submitted for owner approval. Schedule is created when owner approves on credit date.'
         });
     }
     catch (err) {

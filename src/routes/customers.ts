@@ -2,6 +2,9 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/supabase';
 import { authenticateJWT, requireCustomerAdmin, AuthRequest } from '../middleware/auth';
+import PDFDocument from 'pdfkit';
+import { getCompanySettings, addStandardHeader, drawTable, PDFTableColumn } from '../utils/pdfTableGenerator';
+import { format } from 'date-fns';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -431,6 +434,98 @@ router.get('/:id/savings', async (req: AuthRequest, res: Response): Promise<void
 
   if (error) { res.status(500).json({ error: error.message }); return; }
   res.json({ data });
+});
+
+router.get('/:id/statement', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (customerError || !customer) { res.status(404).json({ error: 'Customer not found' }); return; }
+    if (req.user?.role !== 'owner' && customer.branch_id !== req.user?.branch_id) {
+      res.status(403).json({ error: 'Access to customer denied' }); return;
+    }
+
+    const { data: loans } = await supabase.from('loans').select('*, loan_payments(*)').eq('customer_id', req.params.id).order('created_at', { ascending: false });
+    const { data: savings } = await supabase.from('savings_accounts').select('*, savings_transactions(*)').eq('customer_id', req.params.id).order('created_at', { ascending: false });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Statement-${customer.customer_code}.pdf`);
+    
+    const doc = new PDFDocument({ margin: 30 });
+    doc.pipe(res);
+
+    const settings = await getCompanySettings();
+    addStandardHeader(doc, 'CUSTOMER COMPREHENSIVE STATEMENT', settings, `Customer: ${customer.full_name} (${customer.customer_code})`);
+
+    // Customer Info Section
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#166534').text('Customer Information');
+    doc.fillColor('#000000').moveDown(0.3);
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`NIC: ${customer.nic_number}`);
+    doc.text(`Phone: ${customer.phone}`);
+    doc.text(`Address: ${customer.address}`);
+    doc.text(`Date Generated: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`);
+    doc.moveDown(1.5);
+
+    // Loans Section
+    if (loans && loans.length > 0) {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#166534').text('Loan Accounts');
+      doc.fillColor('#000000').moveDown(0.5);
+      
+      const loanCols: PDFTableColumn[] = [
+        { header: 'Loan Code', key: 'loan_code', width: 100 },
+        { header: 'Status', key: 'status', width: 80 },
+        { header: 'Principal', key: 'principal', width: 100, align: 'right' },
+        { header: 'Payable', key: 'payable', width: 100, align: 'right' },
+        { header: 'Balance', key: 'balance', width: 100, align: 'right' },
+      ];
+      
+      const loanRows = loans.map(l => ({
+        loan_code: l.loan_code,
+        status: l.status.toUpperCase(),
+        principal: Number(l.principal_amount).toFixed(2),
+        payable: Number(l.total_payable).toFixed(2),
+        balance: Number(l.remaining_balance).toFixed(2),
+      }));
+      
+      drawTable(doc, loanCols, loanRows, settings, 'CUSTOMER STATEMENT');
+      doc.moveDown(1.5);
+    }
+
+    // Savings Section
+    if (savings && savings.length > 0) {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#166534').text('Savings Accounts');
+      doc.fillColor('#000000').moveDown(0.5);
+      
+      const savCols: PDFTableColumn[] = [
+        { header: 'Account', key: 'account_code', width: 100 },
+        { header: 'Type', key: 'type', width: 80 },
+        { header: 'Rate', key: 'rate', width: 60, align: 'right' },
+        { header: 'Balance', key: 'balance', width: 100, align: 'right' },
+      ];
+      
+      const savRows = savings.map(s => ({
+        account_code: s.account_code,
+        type: s.account_type.toUpperCase(),
+        rate: `${s.interest_rate}%`,
+        balance: Number(s.balance).toFixed(2),
+      }));
+      
+      drawTable(doc, savCols, savRows, settings, 'CUSTOMER STATEMENT');
+      doc.moveDown(1.5);
+    }
+
+    doc.fontSize(9).fillColor('#6b7280').text('This is a computer-generated document.', { align: 'center' });
+    doc.end();
+
+  } catch (err) {
+    console.error('Statement error:', err);
+    res.status(500).json({ error: 'Failed to generate statement' });
+  }
 });
 
 export default router;

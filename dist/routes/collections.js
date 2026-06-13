@@ -10,7 +10,7 @@ const applySavings_1 = require("../utils/applySavings");
 const sms_1 = require("../utils/sms");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
-const requireStaff = (0, auth_1.requireRole)('staff');
+const requireStaff = (0, auth_1.requireRole)('staff', 'owner');
 const requireAdminOrOwner = (0, auth_1.requireRole)('owner', 'admin');
 const today = () => (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
 const staffPaymentSchema = zod_1.z.object({
@@ -123,6 +123,10 @@ router.post('/submit/payment', requireStaff, async (req, res) => {
         }
         if (body.amount > Number(loan.remaining_balance) + 1) {
             res.status(400).json({ error: 'Amount exceeds remaining balance' });
+            return;
+        }
+        if (body.payment_type === 'full_settlement' && Math.abs(body.amount - Number(loan.remaining_balance)) > 1) {
+            res.status(400).json({ error: 'Full settlement amount must equal remaining balance' });
             return;
         }
         const { data: payment, error } = await supabase_1.supabase

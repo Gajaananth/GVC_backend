@@ -8,9 +8,13 @@ import { format } from 'date-fns';
 const router = Router();
 
 // A simple API key middleware for cron tasks
+const cronKey = process.env.CRON_SECRET;
+if (!cronKey) {
+  throw new Error('Missing required environment variable: CRON_SECRET');
+}
+
 const requireCronKey = (req: Request, res: Response, next: Function) => {
   const authHeader = req.headers.authorization;
-  const cronKey = process.env.CRON_SECRET || 'secret_cron_key_123';
   if (!authHeader || authHeader !== `Bearer ${cronKey}`) {
     res.status(401).json({ error: 'Unauthorized cron access' });
     return;

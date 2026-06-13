@@ -1,4 +1,3 @@
-import { format } from 'date-fns';
 import { supabase } from '../config/supabase';
 
 export async function applyLoanPayment(paymentId: string, userId: string): Promise<{ success: boolean; error?: string }> {
@@ -28,42 +27,87 @@ export async function applyLoanPayment(paymentId: string, userId: string): Promi
     return { success: false, error: 'Amount exceeds remaining balance' };
   }
 
-  const interestPerInstallment = Number(loan.total_interest) / loan.duration_months;
-  const interestPaid = Math.min(interestPerInstallment, bodyAmount);
-  const principalPaid = Math.max(0, bodyAmount - interestPaid);
   const paymentDate = payment.payment_date;
+  let remainingPayment = bodyAmount;
+  let totalInterestPaid = 0;
+  let totalPrincipalPaid = 0;
+
+  const { data: installments, error: scheduleError } = await supabase
+    .from('loan_schedule')
+    .select('*')
+    .eq('loan_id', payment.loan_id)
+    .in('status', ['pending', 'partial', 'overdue'])
+    .order('installment_number', { ascending: true });
+
+  if (scheduleError) {
+    return { success: false, error: 'Failed to load loan schedule' };
+  }
+
+  const updatedInstallments: Array<{ id: string; status: string; paid_amount: number }> = [];
+
+  for (const installment of installments || []) {
+    if (remainingPayment <= 0) break;
+
+    const installmentAmount = Number(installment.installment_amount);
+    const paidAmount = Number(installment.paid_amount || 0);
+    const remainingInstallment = Math.max(0, installmentAmount - paidAmount);
+    if (remainingInstallment <= 0) continue;
+
+    const allocation = Math.min(remainingPayment, remainingInstallment);
+    const proportion = installmentAmount > 0 ? allocation / installmentAmount : 0;
+    const interestShare = Math.round((Number(installment.interest_amount) * proportion) * 100) / 100;
+    const principalShare = Math.round((allocation - interestShare) * 100) / 100;
+
+    totalInterestPaid += interestShare;
+    totalPrincipalPaid += principalShare;
+    remainingPayment -= allocation;
+
+    const newPaidAmount = Math.min(installmentAmount, paidAmount + allocation);
+    const newStatus = newPaidAmount >= installmentAmount ? 'paid' : 'partial';
+
+    updatedInstallments.push({
+      id: installment.id,
+      paid_amount: newPaidAmount,
+      status: newStatus
+    });
+  }
+
+  if (remainingPayment > 0) {
+    // Apply any remaining payment toward the loan balance even if schedule is fully paid.
+    totalPrincipalPaid += remainingPayment;
+    remainingPayment = 0;
+  }
 
   const newBalance = Math.max(0, Number(loan.remaining_balance) - bodyAmount);
   const newAmountPaid = Number(loan.amount_paid) + bodyAmount;
   const isFullyPaid = newBalance <= 0.01 || payment.payment_type === 'full_settlement';
 
-  const { data: pendingInstallments } = await supabase
-    .from('loan_schedule')
-    .select('*')
-    .eq('loan_id', payment.loan_id)
-    .in('status', ['pending', 'partial', 'overdue'])
-    .order('installment_number', { ascending: true })
-    .limit(1);
-
-  const currentInstallment = pendingInstallments?.[0];
   let nextDueDate: string | null = null;
-
-  if (!isFullyPaid && currentInstallment) {
+  if (!isFullyPaid) {
     const { data: nextInstallment } = await supabase
       .from('loan_schedule')
       .select('due_date')
       .eq('loan_id', payment.loan_id)
-      .in('status', ['pending', 'partial'])
-      .gt('installment_number', currentInstallment.installment_number)
+      .in('status', ['pending', 'partial', 'overdue'])
       .order('installment_number', { ascending: true })
       .limit(1)
       .single();
     nextDueDate = nextInstallment?.due_date || null;
   }
 
+  if (updatedInstallments.length > 0) {
+    for (const installment of updatedInstallments) {
+      await supabase.from('loan_schedule').update({
+        paid_amount: installment.paid_amount,
+        status: installment.status,
+        paid_date: paymentDate
+      }).eq('id', installment.id);
+    }
+  }
+
   await supabase.from('loan_payments').update({
-    principal_paid: principalPaid,
-    interest_paid: interestPaid,
+    principal_paid: totalPrincipalPaid,
+    interest_paid: totalInterestPaid,
     approval_status: 'approved'
   }).eq('id', paymentId);
 
@@ -73,19 +117,9 @@ export async function applyLoanPayment(paymentId: string, userId: string): Promi
     last_payment_date: paymentDate,
     next_due_date: nextDueDate,
     is_fully_paid: isFullyPaid,
-    status: isFullyPaid ? 'closed' : loan.status === 'overdue' ? 'active' : loan.status,
+    status: isFullyPaid ? 'closed' : loan.status,
     updated_by: userId
   }).eq('id', payment.loan_id);
-
-  if (currentInstallment) {
-    const newPaid = (currentInstallment.paid_amount || 0) + bodyAmount;
-    const installmentStatus = newPaid >= currentInstallment.installment_amount ? 'paid' : 'partial';
-    await supabase.from('loan_schedule').update({
-      paid_amount: Math.min(newPaid, currentInstallment.installment_amount),
-      status: installmentStatus,
-      paid_date: paymentDate
-    }).eq('id', currentInstallment.id);
-  }
 
   return { success: true };
 }

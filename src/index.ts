@@ -29,6 +29,7 @@ import notificationsRoutes from './routes/notifications';
 import importExportRoutes from './routes/import-export';
 import searchRoutes from './routes/search';
 import cronRoutes from './routes/cron';
+import fixedDepositRoutes from './routes/fixed_deposits';
 
 dotenv.config();
 
@@ -106,6 +107,7 @@ app.use('/api/documents', documentsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/import-export', importExportRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/fixed-deposits', fixedDepositRoutes);
 
 // 404 handler
 app.use((_req, res) => {

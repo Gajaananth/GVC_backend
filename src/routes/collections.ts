@@ -16,7 +16,7 @@ import { sendSMS } from '../utils/sms';
 const router = Router();
 router.use(authenticateJWT);
 
-const requireStaff = requireRole('staff');
+const requireStaff = requireRole('staff', 'owner');
 const requireAdminOrOwner = requireRole('owner', 'admin');
 
 const today = () => format(new Date(), 'yyyy-MM-dd');
@@ -139,6 +139,10 @@ router.post('/submit/payment', requireStaff, async (req: AuthRequest, res: Respo
     }
     if (body.amount > Number(loan.remaining_balance) + 1) {
       res.status(400).json({ error: 'Amount exceeds remaining balance' });
+      return;
+    }
+    if (body.payment_type === 'full_settlement' && Math.abs(body.amount - Number(loan.remaining_balance)) > 1) {
+      res.status(400).json({ error: 'Full settlement amount must equal remaining balance' });
       return;
     }
 

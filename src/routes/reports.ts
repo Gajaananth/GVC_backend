@@ -129,7 +129,7 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       case 'customer_wise': {
         let query = supabase
           .from('customers')
-          .select(`*, loans(id, loan_code, principal_amount, remaining_balance, status), savings_accounts(id, account_code, balance)`);
+          .select(`*, loans(id, loan_code, principal_amount, remaining_balance, status), savings_accounts(id, account_code, balance), fixed_deposits(id, fd_code, principal_amount, status)`);
         
         if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
 
@@ -352,6 +352,25 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
         rows = (data || []).map(l => ({
           ...l,
           balance: Number(l.remaining_balance).toFixed(2)
+        }));
+      } else if (type === 'customer_wise') {
+        let query = supabase.from('customers').select(`*, loans(id, loan_code, principal_amount, remaining_balance, status), savings_accounts(id, account_code, balance), fixed_deposits(id, fd_code, principal_amount, status)`);
+        if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
+        const { data } = await query;
+        columns = [
+          { header: 'Customer', key: 'customer', width: 120 },
+          { header: 'NIC', key: 'nic', width: 100 },
+          { header: 'Loans', key: 'loans', width: 100 },
+          { header: 'Savings', key: 'savings', width: 100 },
+          { header: 'Fixed Deposits', key: 'fds', width: 100 },
+        ];
+        rows = (data || []).map(c => ({
+          ...c,
+          customer: c.full_name,
+          nic: c.nic_number,
+          loans: (c as any).loans?.length || 0,
+          savings: (c as any).savings_accounts?.length || 0,
+          fds: (c as any).fixed_deposits?.length || 0,
         }));
       }
 

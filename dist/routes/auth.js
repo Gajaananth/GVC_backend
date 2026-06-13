@@ -62,7 +62,7 @@ router.post('/login', async (req, res) => {
             user_code: user.user_code
         };
         const accessToken = jsonwebtoken_1.default.sign(payload, process.env.JWT_SECRET, {
-            expiresIn: process.env.JWT_EXPIRES_IN || '15m'
+            expiresIn: process.env.JWT_EXPIRES_IN || '24h'
         });
         const refreshToken = jsonwebtoken_1.default.sign({ id: user.id }, process.env.JWT_REFRESH_SECRET, {
             expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d'
@@ -109,7 +109,7 @@ router.post('/refresh', async (req, res) => {
             res.status(401).json({ error: 'Invalid refresh token' });
             return;
         }
-        const accessToken = jsonwebtoken_1.default.sign({ id: user.id, email: user.email, role: user.role, full_name: user.full_name, user_code: user.user_code }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '15m' });
+        const accessToken = jsonwebtoken_1.default.sign({ id: user.id, email: user.email, role: user.role, full_name: user.full_name, user_code: user.user_code }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '24h' });
         res.json({ accessToken });
     }
     catch {
@@ -189,6 +189,55 @@ router.post('/reset-password', async (req, res) => {
     }
     catch {
         res.status(400).json({ error: 'Invalid or expired reset token' });
+    }
+});
+const changePasswordSchema = zod_1.z.object({
+    currentPassword: zod_1.z.string().min(6),
+    newPassword: zod_1.z.string().min(8)
+});
+// POST /api/auth/change-password
+router.post('/change-password', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
+        const token = authHeader.split(' ')[1];
+        const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
+        const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+        const { data: user } = await supabase_1.supabase
+            .from('users')
+            .select('id, password_hash')
+            .eq('id', decoded.id)
+            .single();
+        if (!user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+        const passwordMatch = await bcryptjs_1.default.compare(currentPassword, user.password_hash);
+        if (!passwordMatch) {
+            res.status(400).json({ error: 'Incorrect current password' });
+            return;
+        }
+        const newPasswordHash = await bcryptjs_1.default.hash(newPassword, 10);
+        await supabase_1.supabase.from('users').update({ password_hash: newPasswordHash }).eq('id', user.id);
+        // Log activity
+        await supabase_1.supabase.from('activity_logs').insert({
+            user_id: user.id,
+            action: 'UPDATE',
+            entity_type: 'user_security',
+            description: 'User changed their password',
+            ip_address: req.ip
+        });
+        res.json({ message: 'Password changed successfully' });
+    }
+    catch (err) {
+        if (err instanceof zod_1.z.ZodError) {
+            res.status(400).json({ error: 'Validation error', details: err.errors });
+            return;
+        }
+        res.status(500).json({ error: 'Failed to change password' });
     }
 });
 exports.default = router;

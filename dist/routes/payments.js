@@ -93,6 +93,10 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             res.status(400).json({ error: `Amount exceeds remaining balance` });
             return;
         }
+        if (body.payment_type === 'full_settlement' && Math.abs(body.amount - loan.remaining_balance) > 1) {
+            res.status(400).json({ error: 'Full settlement amount must equal remaining balance' });
+            return;
+        }
         const { data: payment, error: payError } = await supabase_1.supabase
             .from('loan_payments')
             .insert({

@@ -228,4 +228,62 @@ router.post('/reset-password', async (req: Request, res: Response): Promise<void
   }
 });
 
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(6),
+  newPassword: z.string().min(8)
+});
+
+// POST /api/auth/change-password
+router.post('/change-password', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
+
+    const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, password_hash')
+      .eq('id', decoded.id)
+      .single();
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const passwordMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!passwordMatch) {
+      res.status(400).json({ error: 'Incorrect current password' });
+      return;
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+    await supabase.from('users').update({ password_hash: newPasswordHash }).eq('id', user.id);
+
+    // Log activity
+    await supabase.from('activity_logs').insert({
+      user_id: user.id,
+      action: 'UPDATE',
+      entity_type: 'user_security',
+      description: 'User changed their password',
+      ip_address: req.ip
+    });
+
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: err.errors });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
 export default router;

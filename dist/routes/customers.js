@@ -7,6 +7,9 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
+const pdfkit_1 = __importDefault(require("pdfkit"));
+const pdfTableGenerator_1 = require("../utils/pdfTableGenerator");
+const date_fns_1 = require("date-fns");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 const customerSchema = zod_1.z.object({
@@ -263,7 +266,8 @@ router.post('/', auth_1.requireCustomerAdmin, upload.fields([
     }
     catch (err) {
         if (err instanceof zod_1.z.ZodError) {
-            res.status(400).json({ error: 'Validation error', details: err.errors });
+            const errorMsg = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+            res.status(400).json({ error: `Validation error: ${errorMsg}`, details: err.errors });
             return;
         }
         res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to create customer' });
@@ -317,10 +321,11 @@ router.put('/:id', auth_1.requireCustomerAdmin, async (req, res) => {
     }
     catch (err) {
         if (err instanceof zod_1.z.ZodError) {
-            res.status(400).json({ error: 'Validation error', details: err.errors });
+            const errorMsg = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+            res.status(400).json({ error: `Validation error: ${errorMsg}`, details: err.errors });
             return;
         }
-        res.status(500).json({ error: 'Failed to update customer' });
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to update customer' });
     }
 });
 // DELETE /api/customers/:id — admin/owner only
@@ -402,6 +407,86 @@ router.get('/:id/savings', async (req, res) => {
         return;
     }
     res.json({ data });
+});
+router.get('/:id/statement', async (req, res) => {
+    try {
+        const { data: customer, error: customerError } = await supabase_1.supabase
+            .from('customers')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
+        if (customerError || !customer) {
+            res.status(404).json({ error: 'Customer not found' });
+            return;
+        }
+        if (req.user?.role !== 'owner' && customer.branch_id !== req.user?.branch_id) {
+            res.status(403).json({ error: 'Access to customer denied' });
+            return;
+        }
+        const { data: loans } = await supabase_1.supabase.from('loans').select('*, loan_payments(*)').eq('customer_id', req.params.id).order('created_at', { ascending: false });
+        const { data: savings } = await supabase_1.supabase.from('savings_accounts').select('*, savings_transactions(*)').eq('customer_id', req.params.id).order('created_at', { ascending: false });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=Statement-${customer.customer_code}.pdf`);
+        const doc = new pdfkit_1.default({ margin: 30 });
+        doc.pipe(res);
+        const settings = await (0, pdfTableGenerator_1.getCompanySettings)();
+        (0, pdfTableGenerator_1.addStandardHeader)(doc, 'CUSTOMER COMPREHENSIVE STATEMENT', settings, `Customer: ${customer.full_name} (${customer.customer_code})`);
+        // Customer Info Section
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#166534').text('Customer Information');
+        doc.fillColor('#000000').moveDown(0.3);
+        doc.fontSize(10).font('Helvetica');
+        doc.text(`NIC: ${customer.nic_number}`);
+        doc.text(`Phone: ${customer.phone}`);
+        doc.text(`Address: ${customer.address}`);
+        doc.text(`Date Generated: ${(0, date_fns_1.format)(new Date(), 'yyyy-MM-dd HH:mm')}`);
+        doc.moveDown(1.5);
+        // Loans Section
+        if (loans && loans.length > 0) {
+            doc.fontSize(12).font('Helvetica-Bold').fillColor('#166534').text('Loan Accounts');
+            doc.fillColor('#000000').moveDown(0.5);
+            const loanCols = [
+                { header: 'Loan Code', key: 'loan_code', width: 100 },
+                { header: 'Status', key: 'status', width: 80 },
+                { header: 'Principal', key: 'principal', width: 100, align: 'right' },
+                { header: 'Payable', key: 'payable', width: 100, align: 'right' },
+                { header: 'Balance', key: 'balance', width: 100, align: 'right' },
+            ];
+            const loanRows = loans.map(l => ({
+                loan_code: l.loan_code,
+                status: l.status.toUpperCase(),
+                principal: Number(l.principal_amount).toFixed(2),
+                payable: Number(l.total_payable).toFixed(2),
+                balance: Number(l.remaining_balance).toFixed(2),
+            }));
+            (0, pdfTableGenerator_1.drawTable)(doc, loanCols, loanRows, settings, 'CUSTOMER STATEMENT');
+            doc.moveDown(1.5);
+        }
+        // Savings Section
+        if (savings && savings.length > 0) {
+            doc.fontSize(12).font('Helvetica-Bold').fillColor('#166534').text('Savings Accounts');
+            doc.fillColor('#000000').moveDown(0.5);
+            const savCols = [
+                { header: 'Account', key: 'account_code', width: 100 },
+                { header: 'Type', key: 'type', width: 80 },
+                { header: 'Rate', key: 'rate', width: 60, align: 'right' },
+                { header: 'Balance', key: 'balance', width: 100, align: 'right' },
+            ];
+            const savRows = savings.map(s => ({
+                account_code: s.account_code,
+                type: s.account_type.toUpperCase(),
+                rate: `${s.interest_rate}%`,
+                balance: Number(s.balance).toFixed(2),
+            }));
+            (0, pdfTableGenerator_1.drawTable)(doc, savCols, savRows, settings, 'CUSTOMER STATEMENT');
+            doc.moveDown(1.5);
+        }
+        doc.fontSize(9).fillColor('#6b7280').text('This is a computer-generated document.', { align: 'center' });
+        doc.end();
+    }
+    catch (err) {
+        console.error('Statement error:', err);
+        res.status(500).json({ error: 'Failed to generate statement' });
+    }
 });
 exports.default = router;
 //# sourceMappingURL=customers.js.map

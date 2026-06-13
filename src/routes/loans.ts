@@ -252,11 +252,11 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
         .select('id, role, is_active, branch_id')
         .eq('id', staffId)
         .single();
-      if (!staff || !staff.is_active || !['staff', 'admin', 'branch_manager', 'cashier'].includes(staff.role)) {
-        res.status(400).json({ error: 'Applied-by and in-charge must be active staff, branch manager, cashier, or admin users' });
+      if (!staff || !staff.is_active || !['staff', 'admin', 'branch_manager', 'cashier', 'owner'].includes(staff.role)) {
+        res.status(400).json({ error: 'Applied-by and in-charge must be active staff, branch manager, cashier, admin, or owner users' });
         return;
       }
-      if (staff.branch_id !== customer.branch_id) {
+      if (staff.role !== 'owner' && staff.branch_id !== customer.branch_id) {
         res.status(400).json({ error: 'Assigned user must belong to the same branch as the customer' });
         return;
       }

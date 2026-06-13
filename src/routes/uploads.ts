@@ -92,17 +92,45 @@ router.post(
 
 // GET /api/uploads/customers/:customerId/documents
 router.get('/customers/:customerId/documents', async (req: AuthRequest, res: Response): Promise<void> => {
-  const { data, error } = await supabase
-    .from('customer_documents')
-    .select('*, users:uploaded_by(full_name)')
-    .eq('customer_id', req.params.customerId)
-    .order('uploaded_at', { ascending: false });
+  try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
 
-  if (error) {
-    res.status(500).json({ error: error.message });
-    return;
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('branch_id, assigned_staff_id')
+      .eq('id', req.params.customerId)
+      .single();
+
+    if (customerError || !customer) {
+      res.status(404).json({ error: 'Customer not found' });
+      return;
+    }
+
+    if (user.role !== 'owner' && customer.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Access to customer documents denied for your branch' });
+      return;
+    }
+
+    if (user.role === 'staff' && customer.assigned_staff_id !== user.id) {
+      res.status(403).json({ error: 'Access to customer documents denied' });
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('customer_documents')
+      .select('*, users:uploaded_by(full_name)')
+      .eq('customer_id', req.params.customerId)
+      .order('uploaded_at', { ascending: false });
+
+    if (error) {
+      res.status(500).json({ error: error.message });
+      return;
+    }
+    res.json({ data });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to load customer documents' });
   }
-  res.json({ data });
 });
 
 export default router;
