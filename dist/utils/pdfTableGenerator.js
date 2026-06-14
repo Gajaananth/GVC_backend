@@ -14,10 +14,11 @@ const getCompanySettings = async () => {
 };
 exports.getCompanySettings = getCompanySettings;
 const addStandardHeader = (doc, title, settings, subtitle) => {
+    doc.y = doc.page.margins.top || 30;
     const logoPath = path_1.default.join(process.cwd(), 'logo.png');
     if (fs_1.default.existsSync(logoPath)) {
         doc.image(logoPath, (doc.page.width - 80) / 2, doc.y, { width: 80 });
-        doc.moveDown(5); // Make room for the logo
+        doc.y += 85; // Force explicit spacing instead of font-size dependent moveDown
     }
     doc.fontSize(22).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
     doc.fontSize(10).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });

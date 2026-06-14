@@ -18,10 +18,11 @@ export const getCompanySettings = async (): Promise<CompanySettings> => {
 };
 
 export const addStandardHeader = (doc: PDFKit.PDFDocument, title: string, settings: any, subtitle?: string) => {
+  doc.y = doc.page.margins.top || 30;
   const logoPath = path.join(process.cwd(), 'logo.png');
   if (fs.existsSync(logoPath)) {
     doc.image(logoPath, (doc.page.width - 80) / 2, doc.y, { width: 80 });
-    doc.moveDown(5); // Make room for the logo
+    doc.y += 85; // Force explicit spacing instead of font-size dependent moveDown
   }
 
   doc.fontSize(22).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
