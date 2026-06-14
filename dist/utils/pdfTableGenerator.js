@@ -7,23 +7,10 @@ exports.drawTable = exports.addStandardHeader = exports.getCompanySettings = voi
 const supabase_1 = require("../config/supabase");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
-// Fetch company settings (mirrors documents.ts helper)
+const companyConfig_1 = require("../config/companyConfig");
+// Fetch company settings using the centralized config
 const getCompanySettings = async () => {
-    const { data, error } = await supabase_1.supabase.from('company_settings').select('*').limit(1);
-    if (error) {
-        return {
-            company_name: 'GVC Agro Finance',
-            company_address: '123 Main Road, Town, Sri Lanka',
-            company_phone: '011-1234567',
-            company_email: 'info@gvcagro.lk'
-        };
-    }
-    return (Array.isArray(data) ? data[0] : data) || {
-        company_name: 'GVC Agro Finance',
-        company_address: '123 Main Road, Town, Sri Lanka',
-        company_phone: '011-1234567',
-        company_email: 'info@gvcagro.lk'
-    };
+    return await (0, companyConfig_1.getCompanySettings)(supabase_1.supabase);
 };
 exports.getCompanySettings = getCompanySettings;
 const addStandardHeader = (doc, title, settings, subtitle) => {

@@ -35,8 +35,8 @@ const loanProductFields = {
   term_count: z.number().int().positive(),
   repayment_frequency: z.enum(['daily', 'weekly', 'biweekly', 'monthly']),
   credit_date: z.string(),
-  applied_by: z.string().uuid(),
-  in_charge_user_id: z.string().uuid(),
+  applied_by: z.string().uuid().optional().nullable(),
+  in_charge_user_id: z.string().uuid().optional().nullable(),
   purpose: z.string().optional().nullable(),
   guarantor_name: z.string().optional().nullable(),
   guarantor_phone: z.string().optional().nullable(),
@@ -191,8 +191,9 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 // POST /api/loans
 router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    // Check for required PDF
-    if (!req.file) {
+    const isOwnerCreator = req.user?.role === 'owner';
+    // Check for required PDF — optional for owner (may be adding old records)
+    if (!req.file && !isOwnerCreator) {
       res.status(400).json({ error: 'Loan application PDF is required' });
       return;
     }
@@ -208,8 +209,8 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
       term_count: Number(req.body.term_count),
       repayment_frequency: req.body.repayment_frequency,
       credit_date: req.body.credit_date,
-      applied_by: req.body.applied_by,
-      in_charge_user_id: req.body.in_charge_user_id,
+      applied_by: req.body.applied_by || null,
+      in_charge_user_id: req.body.in_charge_user_id || null,
       purpose: req.body.purpose || null,
       guarantor_name: req.body.guarantor_name || null,
       guarantor_phone: req.body.guarantor_phone || null,
@@ -246,7 +247,9 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
     const approvalStatus = isOwnerCreation ? 'approved' : 'pending_approval';
     const status = isOwnerCreation ? 'active' : 'pending_approval';
 
-    for (const staffId of [body.applied_by, body.in_charge_user_id]) {
+    // Only validate staff if provided — owner can skip staff assignment
+    const staffIdsToValidate = [body.applied_by, body.in_charge_user_id].filter(Boolean) as string[];
+    for (const staffId of staffIdsToValidate) {
       const { data: staff } = await supabase
         .from('users')
         .select('id, role, is_active, branch_id')
@@ -262,6 +265,12 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
       }
     }
 
+    // Non-owner users must provide staff
+    if (!isOwnerCreation && (!body.applied_by || !body.in_charge_user_id)) {
+      res.status(400).json({ error: 'Staff applied-by and in-charge are required' });
+      return;
+    }
+
     const calc = calculateLoanProduct({
       grossLoanAmount: body.gross_loan_amount,
       insuranceFeePercent: body.insurance_fee_percent,
@@ -273,7 +282,7 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
       creditDate: body.credit_date
     });
 
-    if (!customer.assigned_staff_id) {
+    if (!customer.assigned_staff_id && body.in_charge_user_id) {
       await supabase.from('customers').update({ assigned_staff_id: body.in_charge_user_id }).eq('id', customer.id);
     }
 
@@ -311,8 +320,8 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
         notes: body.notes,
         status,
         approval_status: approvalStatus,
-        applied_by: body.applied_by,
-        in_charge_user_id: body.in_charge_user_id,
+        applied_by: body.applied_by || null,
+        in_charge_user_id: body.in_charge_user_id || null,
         approved_by: isOwnerCreation ? req.user!.id : null,
         approved_at: isOwnerCreation ? new Date().toISOString() : null,
         created_by: req.user!.id
@@ -325,30 +334,36 @@ router.post('/', requireAdmin, loanUpload.single('loan_application_pdf'), async 
       return;
     }
 
-    // Upload user-provided loan application PDF
+    // Upload user-provided loan application PDF (if provided)
     let loanApplicationUrl: string | null = null;
-    try {
-      const BUCKET = process.env.STORAGE_BUCKET || 'gvc-finance-files';
-      const ext = path.extname(req.file.originalname) || '.pdf';
-      const storagePath = `loans/${loan.id}/application/${uuidv4()}${ext}`;
-      const { error: uploadErr } = await supabase.storage
-        .from(BUCKET)
-        .upload(storagePath, req.file.buffer, {
-          contentType: 'application/pdf',
-          upsert: false
-        });
-      if (uploadErr) throw uploadErr;
-      const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
-      loanApplicationUrl = publicData.publicUrl;
-      await supabase.from('loans').update({ loan_application_url: loanApplicationUrl }).eq('id', loan.id);
-    } catch (pdfUploadErr) {
-      console.error('Failed to upload loan application PDF:', pdfUploadErr);
-      // Non-blocking — loan is still created
+    if (req.file) {
+      try {
+        const BUCKET = process.env.STORAGE_BUCKET || 'gvc-finance-files';
+        const ext = path.extname(req.file.originalname) || '.pdf';
+        const storagePath = `loans/${loan.id}/application/${uuidv4()}${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from(BUCKET)
+          .upload(storagePath, req.file.buffer, {
+            contentType: 'application/pdf',
+            upsert: false
+          });
+        if (uploadErr) throw uploadErr;
+        const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+        loanApplicationUrl = publicData.publicUrl;
+        await supabase.from('loans').update({ loan_application_url: loanApplicationUrl }).eq('id', loan.id);
+      } catch (pdfUploadErr) {
+        console.error('Failed to upload loan application PDF:', pdfUploadErr);
+        // Non-blocking — loan is still created
+      }
     }
 
     // Fetch staff names for the auto-generated PDF
-    const { data: appliedByUser } = await supabase.from('users').select('full_name').eq('id', body.applied_by).single();
-    const { data: inChargeUser } = await supabase.from('users').select('full_name').eq('id', body.in_charge_user_id).single();
+    const { data: appliedByUser } = body.applied_by
+      ? await supabase.from('users').select('full_name').eq('id', body.applied_by).single()
+      : { data: null };
+    const { data: inChargeUser } = body.in_charge_user_id
+      ? await supabase.from('users').select('full_name').eq('id', body.in_charge_user_id).single()
+      : { data: null };
 
     // Generate Loan Application PDF and upload to Supabase
     let loanFormUrl: string | null = null;
@@ -582,6 +597,177 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response): Promise<voi
 
   if (error) { res.status(500).json({ error: error.message }); return; }
   res.json({ data });
+});
+
+// POST /api/loans/:id/backdate-payments — Owner only: mark installments as paid with exact dates (for migrating old records)
+const backdatePaymentSchema = z.object({
+  payments: z.array(z.object({
+    installment_number: z.number().int().positive(),
+    paid_amount: z.number().positive(),
+    paid_date: z.string(), // YYYY-MM-DD
+    notes: z.string().optional().nullable(),
+  }))
+});
+
+router.post('/:id/backdate-payments', requireOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const loanId = req.params.id;
+    const body = backdatePaymentSchema.parse(req.body);
+
+    // Fetch the loan
+    const { data: loan, error: loanErr } = await supabase
+      .from('loans')
+      .select('*')
+      .eq('id', loanId)
+      .single();
+
+    if (loanErr || !loan) {
+      res.status(404).json({ error: 'Loan not found' });
+      return;
+    }
+
+    if (loan.approval_status !== 'approved') {
+      res.status(400).json({ error: 'Can only backdate payments for approved loans' });
+      return;
+    }
+
+    // Fetch current schedule
+    const { data: schedule, error: schedErr } = await supabase
+      .from('loan_schedule')
+      .select('*')
+      .eq('loan_id', loanId)
+      .order('installment_number', { ascending: true });
+
+    if (schedErr || !schedule) {
+      res.status(500).json({ error: 'Failed to load schedule' });
+      return;
+    }
+
+    let totalPaid = 0;
+    const updatedInstallments: string[] = [];
+    const paymentRecords: any[] = [];
+
+    for (const pmt of body.payments) {
+      const installment = schedule.find(s => s.installment_number === pmt.installment_number);
+      if (!installment) {
+        res.status(400).json({ error: `Installment #${pmt.installment_number} not found in schedule` });
+        return;
+      }
+
+      const installmentAmount = Number(installment.installment_amount);
+      const paidAmount = Math.min(pmt.paid_amount, installmentAmount);
+      const newStatus = paidAmount >= installmentAmount ? 'paid' : 'partial';
+
+      // Update the schedule row
+      await supabase.from('loan_schedule').update({
+        paid_amount: paidAmount,
+        status: newStatus,
+        paid_date: pmt.paid_date,
+      }).eq('id', installment.id);
+
+      updatedInstallments.push(installment.id);
+      totalPaid += paidAmount;
+
+      // Calculate interest/principal split
+      const proportion = installmentAmount > 0 ? paidAmount / installmentAmount : 0;
+      const interestShare = Math.round((Number(installment.interest_amount) * proportion) * 100) / 100;
+      const principalShare = Math.round((paidAmount - interestShare) * 100) / 100;
+
+      // Create a loan_payments record for history
+      paymentRecords.push({
+        loan_id: loanId,
+        customer_id: loan.customer_id,
+        branch_id: loan.branch_id,
+        payment_date: pmt.paid_date,
+        amount: paidAmount,
+        cash_amount: paidAmount,
+        online_amount: 0,
+        payment_type: 'regular',
+        payment_method: 'cash',
+        principal_paid: principalShare,
+        interest_paid: interestShare,
+        notes: pmt.notes || `Backdated payment for installment #${pmt.installment_number}`,
+        approval_status: 'approved',
+        approved_by: req.user!.id,
+        approved_at: new Date().toISOString(),
+        created_by: req.user!.id,
+      });
+    }
+
+    // Insert payment records
+    if (paymentRecords.length > 0) {
+      const { error: payInsertErr } = await supabase
+        .from('loan_payments')
+        .insert(paymentRecords);
+      if (payInsertErr) {
+        console.error('Failed to insert backdated payments:', payInsertErr);
+      }
+    }
+
+    // Update loan balances
+    const newAmountPaid = Number(loan.amount_paid || 0) + totalPaid;
+    const newBalance = Math.max(0, Number(loan.remaining_balance) - totalPaid);
+    const isFullyPaid = newBalance <= 0.01;
+
+    // Find next unpaid installment for next_due_date
+    let nextDueDate: string | null = null;
+    if (!isFullyPaid) {
+      const { data: nextInst } = await supabase
+        .from('loan_schedule')
+        .select('due_date')
+        .eq('loan_id', loanId)
+        .in('status', ['pending', 'partial', 'overdue'])
+        .order('installment_number', { ascending: true })
+        .limit(1)
+        .single();
+      nextDueDate = nextInst?.due_date || null;
+    }
+
+    // Find last paid date
+    const lastPaidDate = body.payments.reduce((latest, p) => {
+      return p.paid_date > latest ? p.paid_date : latest;
+    }, '');
+
+    await supabase.from('loans').update({
+      amount_paid: newAmountPaid,
+      remaining_balance: newBalance,
+      is_fully_paid: isFullyPaid,
+      last_payment_date: lastPaidDate || loan.last_payment_date,
+      next_due_date: nextDueDate,
+      status: isFullyPaid ? 'closed' : loan.status,
+      updated_by: req.user!.id,
+    }).eq('id', loanId);
+
+    // Activity log
+    await supabase.from('activity_logs').insert({
+      user_id: req.user!.id,
+      user_name: req.user!.full_name,
+      user_role: req.user!.role,
+      action: 'UPDATE',
+      entity_type: 'loan',
+      entity_id: loanId,
+      entity_code: loan.loan_code,
+      branch_id: loan.branch_id,
+      description: `Backdated ${body.payments.length} payment(s) totalling ₨${totalPaid.toLocaleString()} for loan ${loan.loan_code}`,
+    });
+
+    res.json({
+      data: {
+        updated_installments: updatedInstallments.length,
+        total_paid: totalPaid,
+        new_balance: newBalance,
+        is_fully_paid: isFullyPaid,
+      },
+      message: `${body.payments.length} payment(s) backdated successfully`,
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: err.errors });
+      return;
+    }
+    console.error('Backdate payments error:', err);
+    res.status(500).json({ error: 'Failed to backdate payments' });
+  }
 });
 
 export default router;

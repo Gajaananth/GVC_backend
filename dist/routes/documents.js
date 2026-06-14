@@ -8,26 +8,9 @@ const pdfkit_1 = __importDefault(require("pdfkit"));
 const supabase_1 = require("../config/supabase");
 const auth_1 = require("../middleware/auth");
 const date_fns_1 = require("date-fns");
+const companyConfig_1 = require("../config/companyConfig");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
-// Helper function to fetch company settings
-const getCompanySettings = async () => {
-    const { data, error } = await supabase_1.supabase.from('company_settings').select('*').limit(1);
-    if (error) {
-        return {
-            company_name: 'GVC Agro Finance',
-            company_address: '123 Main Road, Town, Sri Lanka',
-            company_phone: '011-1234567',
-            company_email: 'info@gvcagro.lk'
-        };
-    }
-    return (Array.isArray(data) ? data[0] : data) || {
-        company_name: 'GVC Agro Finance',
-        company_address: '123 Main Road, Town, Sri Lanka',
-        company_phone: '011-1234567',
-        company_email: 'info@gvcagro.lk'
-    };
-};
 // Helper function to generate PDF headers
 const addHeader = (doc, title, settings) => {
     doc.fontSize(22).font('Helvetica-Bold').text(settings.company_name, { align: 'center' });
@@ -61,7 +44,7 @@ router.get('/receipt/:payment_id', async (req, res) => {
         }
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=receipt-${payment.payment_code}.pdf`);
-        const settings = await getCompanySettings();
+        const settings = await (0, companyConfig_1.getCompanySettings)();
         const doc = new pdfkit_1.default({ margin: 50 });
         doc.pipe(res);
         addHeader(doc, 'OFFICIAL PAYMENT RECEIPT', settings);
@@ -144,7 +127,7 @@ router.get('/statement/:customer_id', async (req, res) => {
             .eq('customer_id', customer.id);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=statement-${customer.customer_code}.pdf`);
-        const settings = await getCompanySettings();
+        const settings = await (0, companyConfig_1.getCompanySettings)();
         const doc = new pdfkit_1.default({ margin: 50 });
         doc.pipe(res);
         addHeader(doc, 'CUSTOMER ACCOUNT STATEMENT', settings);
@@ -224,7 +207,7 @@ router.get('/loan-certificate/:loan_id', async (req, res) => {
         }
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=certificate-${loan.loan_code}.pdf`);
-        const settings = await getCompanySettings();
+        const settings = await (0, companyConfig_1.getCompanySettings)();
         const doc = new pdfkit_1.default({ margin: 50, layout: 'landscape' });
         doc.pipe(res);
         // Border

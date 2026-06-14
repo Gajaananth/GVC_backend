@@ -3,28 +3,10 @@ import PDFDocument from 'pdfkit';
 import { supabase } from '../config/supabase';
 import { authenticateJWT, AuthRequest } from '../middleware/auth';
 import { format } from 'date-fns';
+import { getCompanySettings } from '../config/companyConfig';
 
 const router = Router();
 router.use(authenticateJWT);
-
-// Helper function to fetch company settings
-const getCompanySettings = async () => {
-  const { data, error } = await supabase.from('company_settings').select('*').limit(1);
-  if (error) {
-    return {
-      company_name: 'GVC Agro Finance',
-      company_address: '123 Main Road, Town, Sri Lanka',
-      company_phone: '011-1234567',
-      company_email: 'info@gvcagro.lk'
-    };
-  }
-  return (Array.isArray(data) ? data[0] : data) || {
-    company_name: 'GVC Agro Finance',
-    company_address: '123 Main Road, Town, Sri Lanka',
-    company_phone: '011-1234567',
-    company_email: 'info@gvcagro.lk'
-  };
-};
 
 // Helper function to generate PDF headers
 const addHeader = (doc: PDFKit.PDFDocument, title: string, settings: any) => {
@@ -74,7 +56,7 @@ router.get('/receipt/:payment_id', async (req: AuthRequest, res: Response): Prom
     doc.font('Helvetica').text(`Date: ${format(new Date(payment.payment_date), 'yyyy-MM-dd')}`, 60);
     doc.text(`Customer Code: ${payment.customers.customer_code}`, 60);
     doc.moveDown(2);
-    
+
     // Customer Info
     doc.font('Helvetica-Bold').text('Customer Details:');
     doc.font('Helvetica').text(`Name: ${payment.customers.full_name}`);
@@ -84,14 +66,14 @@ router.get('/receipt/:payment_id', async (req: AuthRequest, res: Response): Prom
     // Payment details table
     doc.font('Helvetica-Bold').text('Payment Details:');
     const tableTop = doc.y + 5;
-    
+
     // Table Header
     doc.rect(50, tableTop, 500, 20).fillAndStroke('#f3f4f6', '#d1d5db');
     doc.fillColor('#374151').font('Helvetica-Bold');
     doc.text('Description', 60, tableTop + 5);
     doc.text('Method', 250, tableTop + 5);
     doc.text('Amount (LKR)', 400, tableTop + 5, { width: 140, align: 'right' });
-    
+
     // Table Row
     const rowTop = tableTop + 20;
     doc.rect(50, rowTop, 500, 30).stroke('#d1d5db');
@@ -99,7 +81,7 @@ router.get('/receipt/:payment_id', async (req: AuthRequest, res: Response): Prom
     doc.text(payment.payment_type.toUpperCase(), 60, rowTop + 10);
     doc.text(payment.payment_method.toUpperCase(), 250, rowTop + 10);
     doc.font('Helvetica-Bold').text(Number(payment.amount).toFixed(2), 400, rowTop + 10, { width: 140, align: 'right' });
-    
+
     if (payment.notes) {
       doc.moveDown(2);
       doc.font('Helvetica-Oblique').text(`Notes: ${payment.notes}`);
@@ -110,7 +92,7 @@ router.get('/receipt/:payment_id', async (req: AuthRequest, res: Response): Prom
     const sigY = doc.y;
     doc.font('Helvetica').text('........................................', 50, sigY);
     doc.text('Customer Signature', 50, sigY + 15);
-    
+
     doc.text('........................................', 350, sigY);
     doc.text('Authorized Signature', 350, sigY + 15);
 
@@ -169,7 +151,7 @@ router.get('/statement/:customer_id', async (req: AuthRequest, res: Response): P
     doc.text(`NIC: ${customer.nic_number}`);
     doc.text(`Date Generated: ${format(new Date(), 'yyyy-MM-dd')}`);
     doc.moveDown(2);
-    
+
     if (savings && savings.length > 0) {
       doc.fontSize(14).font('Helvetica-Bold').fillColor('#166534').text('Savings Accounts');
       doc.fillColor('#000000');
@@ -192,7 +174,7 @@ router.get('/statement/:customer_id', async (req: AuthRequest, res: Response): P
         doc.fontSize(11).font('Helvetica').text(`Principal Amount: LKR ${Number(loan.principal_amount).toFixed(2)}`);
         doc.text(`Remaining Balance: LKR ${Number(loan.remaining_balance).toFixed(2)}`);
         doc.moveDown(0.5);
-        
+
         doc.font('Helvetica-Bold').text('Payment History:');
         if (loan.loan_payments && loan.loan_payments.length > 0) {
           doc.font('Helvetica');
@@ -255,21 +237,21 @@ router.get('/loan-certificate/:loan_id', async (req: AuthRequest, res: Response)
     doc.moveDown(3);
     doc.fontSize(30).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
     doc.fontSize(12).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });
-    
+
     doc.moveDown(3);
     doc.fontSize(24).font('Helvetica-Bold').text('LOAN SETTLEMENT CERTIFICATE', { align: 'center', underline: true });
-    
+
     doc.moveDown(3);
     doc.fontSize(14).font('Helvetica');
     doc.text(`This is to certify that `, { continued: true, align: 'center' });
     doc.font('Helvetica-Bold').text(`${loan.customers.full_name}`, { continued: true });
     doc.font('Helvetica').text(` (NIC: ${loan.customers.nic_number})`);
-    
+
     doc.moveDown();
     doc.text(`has successfully settled the loan account `, { continued: true, align: 'center' });
     doc.font('Helvetica-Bold').text(`${loan.loan_code}`, { continued: true });
     doc.font('Helvetica').text(` in full.`);
-    
+
     doc.moveDown();
     doc.text(`Loan Amount: LKR ${Number(loan.principal_amount).toFixed(2)}`, { align: 'center' });
     doc.text(`Settlement Date: ${format(new Date(loan.last_payment_date || new Date()), 'yyyy-MM-dd')}`, { align: 'center' });
@@ -279,7 +261,7 @@ router.get('/loan-certificate/:loan_id', async (req: AuthRequest, res: Response)
     doc.font('Helvetica').text('........................................', 500, sigY);
     doc.text('Authorized Signature', 500, sigY + 15);
     doc.text('GVC Agro Finance', 500, sigY + 30);
-    
+
     doc.end();
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to generate certificate' });

@@ -3,6 +3,7 @@ import { supabase } from '../config/supabase';
 import { format } from 'date-fns';
 import path from 'path';
 import fs from 'fs';
+import { getCompanySettings as getCentralizedCompanySettings, CompanySettings } from '../config/companyConfig';
 
 export interface PDFTableColumn {
   header: string;
@@ -11,23 +12,9 @@ export interface PDFTableColumn {
   align?: 'left' | 'center' | 'right';
 }
 
-// Fetch company settings (mirrors documents.ts helper)
-export const getCompanySettings = async () => {
-  const { data, error } = await supabase.from('company_settings').select('*').limit(1);
-  if (error) {
-    return {
-      company_name: 'GVC Agro Finance',
-      company_address: '123 Main Road, Town, Sri Lanka',
-      company_phone: '011-1234567',
-      company_email: 'info@gvcagro.lk'
-    };
-  }
-  return (Array.isArray(data) ? data[0] : data) || {
-    company_name: 'GVC Agro Finance',
-    company_address: '123 Main Road, Town, Sri Lanka',
-    company_phone: '011-1234567',
-    company_email: 'info@gvcagro.lk'
-  };
+// Fetch company settings using the centralized config
+export const getCompanySettings = async (): Promise<CompanySettings> => {
+  return await getCentralizedCompanySettings(supabase);
 };
 
 export const addStandardHeader = (doc: PDFKit.PDFDocument, title: string, settings: any, subtitle?: string) => {
@@ -58,11 +45,11 @@ export const drawTable = (
 ) => {
   const startX = 30; // Small margin to fit more columns
   const rowHeight = 20;
-  
+
   const drawHeaders = (y: number) => {
     doc.rect(startX, y, doc.page.width - startX * 2, rowHeight).fillAndStroke('#f3f4f6', '#d1d5db');
     doc.fillColor('#374151').font('Helvetica-Bold').fontSize(9);
-    
+
     let xPos = startX + 5;
     for (const col of columns) {
       doc.text(col.header, xPos, y + 6, { width: col.width - 10, align: col.align || 'left' });
@@ -84,7 +71,7 @@ export const drawTable = (
     }
 
     doc.rect(startX, rowY, doc.page.width - startX * 2, rowHeight).stroke('#e5e7eb');
-    
+
     let xPos = startX + 5;
     for (const col of columns) {
       const val = row[col.key] !== undefined && row[col.key] !== null ? String(row[col.key]) : '';
