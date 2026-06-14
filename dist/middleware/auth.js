@@ -7,12 +7,18 @@ exports.requireOwner = exports.requireWrite = exports.requireCustomerAdmin = exp
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const supabase_1 = require("../config/supabase");
 const authenticateJWT = async (req, res, next) => {
+    let token;
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    if (authHeader?.startsWith('Bearer ')) {
+        token = authHeader.split(' ')[1];
+    }
+    else if (req.query.token && typeof req.query.token === 'string') {
+        token = req.query.token;
+    }
+    if (!token) {
         res.status(401).json({ error: 'Authorization token required' });
         return;
     }
-    const token = authHeader.split(' ')[1];
     try {
         const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
         // Verify user still exists and is active

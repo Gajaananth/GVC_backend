@@ -19,14 +19,19 @@ export const authenticateJWT = async (
   res: Response,
   next: NextFunction
 ): Promise<void> => {
+  let token: string | undefined;
+  
   const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.query.token && typeof req.query.token === 'string') {
+    token = req.query.token;
+  }
 
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (!token) {
     res.status(401).json({ error: 'Authorization token required' });
     return;
   }
-
-  const token = authHeader.split(' ')[1];
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {

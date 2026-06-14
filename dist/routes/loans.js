@@ -620,7 +620,7 @@ router.post('/:id/backdate-payments', auth_1.requireOwner, async (req, res) => {
                 return;
             }
             const installmentAmount = Number(installment.installment_amount);
-            const paidAmount = Math.min(pmt.paid_amount, installmentAmount);
+            const paidAmount = pmt.paid_amount;
             const newStatus = paidAmount >= installmentAmount ? 'paid' : 'partial';
             // Update the schedule row
             await supabase_1.supabase.from('loan_schedule').update({
@@ -631,7 +631,7 @@ router.post('/:id/backdate-payments', auth_1.requireOwner, async (req, res) => {
             updatedInstallments.push(installment.id);
             totalPaid += paidAmount;
             // Calculate interest/principal split
-            const proportion = installmentAmount > 0 ? paidAmount / installmentAmount : 0;
+            const proportion = installmentAmount > 0 ? Math.min(paidAmount / installmentAmount, 1) : 0;
             const interestShare = Math.round((Number(installment.interest_amount) * proportion) * 100) / 100;
             const principalShare = Math.round((paidAmount - interestShare) * 100) / 100;
             // Create a loan_payments record for history

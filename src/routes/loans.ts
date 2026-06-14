@@ -655,7 +655,7 @@ router.post('/:id/backdate-payments', requireOwner, async (req: AuthRequest, res
       }
 
       const installmentAmount = Number(installment.installment_amount);
-      const paidAmount = Math.min(pmt.paid_amount, installmentAmount);
+      const paidAmount = pmt.paid_amount;
       const newStatus = paidAmount >= installmentAmount ? 'paid' : 'partial';
 
       // Update the schedule row
@@ -669,7 +669,7 @@ router.post('/:id/backdate-payments', requireOwner, async (req: AuthRequest, res
       totalPaid += paidAmount;
 
       // Calculate interest/principal split
-      const proportion = installmentAmount > 0 ? paidAmount / installmentAmount : 0;
+      const proportion = installmentAmount > 0 ? Math.min(paidAmount / installmentAmount, 1) : 0;
       const interestShare = Math.round((Number(installment.interest_amount) * proportion) * 100) / 100;
       const principalShare = Math.round((paidAmount - interestShare) * 100) / 100;
 
