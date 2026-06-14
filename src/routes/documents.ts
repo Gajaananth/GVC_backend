@@ -4,6 +4,8 @@ import { supabase } from '../config/supabase';
 import { authenticateJWT, AuthRequest } from '../middleware/auth';
 import { format } from 'date-fns';
 import { getCompanySettings } from '../config/companyConfig';
+import ExcelJS from 'exceljs';
+import { addStandardHeader, drawTable, PDFTableColumn } from '../utils/pdfTableGenerator';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -265,6 +267,141 @@ router.get('/loan-certificate/:loan_id', async (req: AuthRequest, res: Response)
     doc.end();
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to generate certificate' });
+  }
+});
+
+// GET /api/documents/loan-schedule/:id/pdf
+router.get('/loan-schedule/:id/pdf', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+    const { data: loan } = await supabase
+      .from('loans')
+      .select('*, customers(full_name, nic_number, customer_code)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (!loan) { res.status(404).json({ error: 'Loan not found' }); return; }
+
+    // Branch isolation
+    if (user.role !== 'owner' && loan.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const { data: schedule } = await supabase
+      .from('loan_schedule')
+      .select('*')
+      .eq('loan_id', loan.id)
+      .order('installment_number', { ascending: true });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=schedule-${loan.loan_code}.pdf`);
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 30, size: 'A4' });
+    doc.pipe(res);
+
+    addStandardHeader(doc, 'LOAN SCHEDULE REPORT', settings, `Loan: ${loan.loan_code} | Customer: ${loan.customers.full_name}`);
+    doc.moveDown(1);
+    
+    // Customer and Loan details summary
+    doc.fontSize(10).font('Helvetica-Bold').text(`Customer Code:`, 30, doc.y, { continued: true }).font('Helvetica').text(` ${loan.customers.customer_code}`);
+    doc.font('Helvetica-Bold').text(`Principal:`, 30, doc.y, { continued: true }).font('Helvetica').text(` ${Number(loan.principal_amount).toFixed(2)} LKR`);
+    doc.font('Helvetica-Bold').text(`Status:`, 30, doc.y, { continued: true }).font('Helvetica').text(` ${loan.status.toUpperCase()}`);
+    doc.moveDown(2);
+
+    const columns: PDFTableColumn[] = [
+      { header: '#', key: 'installment_number', width: 30 },
+      { header: 'Due Date', key: 'due_date', width: 80 },
+      { header: 'Due Amount', key: 'installment_amount', width: 80, align: 'right' },
+      { header: 'Status', key: 'status', width: 70 },
+      { header: 'Paid Date', key: 'paid_date', width: 80 },
+      { header: 'Paid Amount', key: 'paid_amount', width: 80, align: 'right' }
+    ];
+
+    const rows = (schedule || []).map((s: any) => ({
+      installment_number: s.installment_number,
+      due_date: s.due_date ? format(new Date(s.due_date), 'yyyy-MM-dd') : '',
+      installment_amount: Number(s.installment_amount).toFixed(2),
+      status: String(s.status).toUpperCase(),
+      paid_date: s.paid_date ? format(new Date(s.paid_date), 'yyyy-MM-dd') : '-',
+      paid_amount: s.paid_amount > 0 ? Number(s.paid_amount).toFixed(2) : '-'
+    }));
+
+    drawTable(doc, columns, rows, settings, 'LOAN SCHEDULE REPORT', `Loan: ${loan.loan_code} | Customer: ${loan.customers.full_name}`);
+    
+    doc.end();
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to generate schedule pdf' });
+  }
+});
+
+// GET /api/documents/loan-schedule/:id/excel
+router.get('/loan-schedule/:id/excel', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+    const { data: loan } = await supabase
+      .from('loans')
+      .select('*, customers(full_name, nic_number, customer_code)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (!loan) { res.status(404).json({ error: 'Loan not found' }); return; }
+
+    // Branch isolation
+    if (user.role !== 'owner' && loan.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const { data: schedule } = await supabase
+      .from('loan_schedule')
+      .select('*')
+      .eq('loan_id', loan.id)
+      .order('installment_number', { ascending: true });
+
+    const settings = await getCompanySettings();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Loan Schedule');
+
+    sheet.columns = [
+      { header: '#', key: 'no', width: 5 },
+      { header: 'Due Date', key: 'dueDate', width: 15 },
+      { header: 'Due Amount', key: 'dueAmount', width: 15 },
+      { header: 'Status', key: 'status', width: 15 },
+      { header: 'Paid Date', key: 'paidDate', width: 15 },
+      { header: 'Paid Amount', key: 'paidAmount', width: 15 }
+    ];
+
+    sheet.insertRow(1, [settings.company_name]);
+    sheet.insertRow(2, [settings.company_address]);
+    sheet.insertRow(3, [`Loan: ${loan.loan_code} | Customer: ${loan.customers.full_name}`]);
+    sheet.insertRow(4, []);
+    
+    // Header style
+    sheet.getRow(1).font = { bold: true, size: 16 };
+    sheet.getRow(3).font = { bold: true };
+
+    (schedule || []).forEach((s: any) => {
+      sheet.addRow({
+        no: s.installment_number,
+        dueDate: s.due_date ? format(new Date(s.due_date), 'yyyy-MM-dd') : '',
+        dueAmount: Number(s.installment_amount),
+        status: String(s.status).toUpperCase(),
+        paidDate: s.paid_date ? format(new Date(s.paid_date), 'yyyy-MM-dd') : '-',
+        paidAmount: s.paid_amount > 0 ? Number(s.paid_amount) : '-'
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=schedule-${loan.loan_code}.xlsx`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to generate schedule excel' });
   }
 });
 
