@@ -7,13 +7,22 @@ import { getCompanySettings } from '../config/companyConfig';
 import ExcelJS from 'exceljs';
 import { addStandardHeader, drawTable, PDFTableColumn } from '../utils/pdfTableGenerator';
 
+import path from 'path';
+import fs from 'fs';
+
 const router = Router();
 router.use(authenticateJWT);
 
-// Helper function to generate PDF headers
+// Helper function to generate PDF headers with logo
 const addHeader = (doc: PDFKit.PDFDocument, title: string, settings: any) => {
-  doc.fontSize(22).font('Helvetica-Bold').text(settings.company_name, { align: 'center' });
-  doc.fontSize(10).font('Helvetica').text(settings.company_address, { align: 'center' });
+  const logoPath = path.join(process.cwd(), 'logo.png');
+  if (fs.existsSync(logoPath)) {
+    doc.image(logoPath, (doc.page.width - 80) / 2, doc.y, { width: 80 });
+    doc.y += 85;
+  }
+
+  doc.fontSize(22).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
+  doc.fontSize(10).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });
   doc.text(`Tel: ${settings.company_phone} | Email: ${settings.company_email}`, { align: 'center' });
   doc.moveDown(1.5);
   doc.fontSize(16).font('Helvetica-Bold').text(title, { align: 'center' });
