@@ -13,6 +13,54 @@ import path from 'path';
 const router = Router();
 router.use(authenticateJWT);
 
+router.post('/heal-receipts', async (req: AuthRequest, res: Response) => {
+  try {
+    // Find all schedule rows that have a paid_amount > 0
+    const { data: schedule } = await supabase
+      .from('loan_schedule')
+      .select('*, loans(customer_id, branch_id)')
+      .gt('paid_amount', 0);
+      
+    if (!schedule) return res.json({ message: 'No schedule found' });
+
+    let healed = 0;
+    for (const s of schedule) {
+      // Check if a payment record exists with this date or note
+      const { data: payments } = await supabase
+        .from('loan_payments')
+        .select('id')
+        .eq('loan_id', s.loan_id)
+        .or(`notes.ilike.%installment #${s.installment_number}%, payment_date.eq.${s.paid_date}`);
+        
+      if (!payments || payments.length === 0) {
+        // Create missing payment
+        await supabase.from('loan_payments').insert({
+          loan_id: s.loan_id,
+          customer_id: s.loans.customer_id,
+          branch_id: s.loans.branch_id,
+          payment_date: s.paid_date || new Date().toISOString(),
+          amount: s.paid_amount,
+          cash_amount: s.paid_amount,
+          online_amount: 0,
+          payment_type: 'regular',
+          payment_method: 'cash',
+          principal_paid: s.paid_amount, // roughly
+          interest_paid: 0,
+          notes: `Recovered backdated payment for installment #${s.installment_number}`,
+          approval_status: 'approved',
+          approved_by: req.user!.id,
+          approved_at: new Date().toISOString(),
+          created_by: req.user!.id
+        });
+        healed++;
+      }
+    }
+    res.json({ message: `Healed ${healed} missing payment records` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const loanUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
