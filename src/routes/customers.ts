@@ -265,13 +265,16 @@ router.post(
     // Need to parse stringified numbers if needed
     const parsedBody = {
       ...req.body,
+      branch_id: req.body.branch_id ? req.body.branch_id : undefined,
+      assigned_staff_id: req.body.assigned_staff_id ? req.body.assigned_staff_id : undefined,
+      registered_by_staff_id: req.body.registered_by_staff_id ? req.body.registered_by_staff_id : undefined,
       monthly_income: req.body.monthly_income ? Number(req.body.monthly_income) : undefined
     };
     
     const body = schemaWithoutUrls.parse(parsedBody);
-    const branchId = req.user?.role === 'owner' ? body.branch_id : req.user!.branch_id;
+    let branchId = req.user?.role === 'owner' ? body.branch_id : req.user!.branch_id;
 
-    if (!branchId) {
+    if (req.user?.role !== 'owner' && !branchId) {
       res.status(400).json({ error: 'Branch selection is required for customer creation' });
       return;
     }
@@ -290,7 +293,16 @@ router.post(
         .eq('id', staffId)
         .single();
 
-      if (!staff || !['staff', 'admin'].includes(staff.role) || staff.branch_id !== branchId) {
+      if (!staff || !['staff', 'admin'].includes(staff.role)) {
+        res.status(400).json({ error: 'Invalid staff member for assignment' });
+        return;
+      }
+
+      if (!branchId) {
+        branchId = staff.branch_id;
+      }
+
+      if (branchId && staff.branch_id !== branchId) {
         res.status(400).json({ error: 'Invalid staff member for assignment' });
         return;
       }
