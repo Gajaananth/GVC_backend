@@ -30,6 +30,7 @@ import importExportRoutes from './routes/import-export';
 import searchRoutes from './routes/search';
 import cronRoutes from './routes/cron';
 import fixedDepositRoutes from './routes/fixed_deposits';
+import customerDeletionRoutes from './routes/customer_deletion';
 
 dotenv.config();
 
@@ -58,6 +59,26 @@ const limiter = rateLimit({
   max: 200,
   message: { error: 'Too many requests, please try again later.' }
 });
+
+// Health check endpoint - exempt from rate limiting
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(), 
+    service: 'GVC Finance API',
+    uptime: process.uptime()
+  });
+});
+
+// Legacy health endpoint
+app.get('/health', (_req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(), 
+    service: 'GVC Finance API' 
+  });
+});
+
 app.use('/api/', limiter);
 
 // Auth endpoints get stricter rate limiting
@@ -66,7 +87,6 @@ const authLimiter = rateLimit({
   max: 20,
   message: { error: 'Too many login attempts, please try again later.' }
 });
-app.use('/api/auth/', authLimiter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -75,18 +95,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Request logging
 app.use(requestLogger);
 
-// Health check
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'GVC Finance API' });
-});
-
-// Root route
-app.get('/', (_req, res) => {
-  res.json({ status: 'ok', message: 'GVC Finance API is running', version: process.env.npm_package_version || 'unknown' });
-});
-
 // API Routes
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/branches', branchRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/customers', customerRoutes);
@@ -108,6 +118,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/import-export', importExportRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/fixed-deposits', fixedDepositRoutes);
+app.use('/api/customers', customerDeletionRoutes);
 
 // 404 handler
 app.use((_req, res) => {

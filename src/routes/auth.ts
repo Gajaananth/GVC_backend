@@ -286,4 +286,31 @@ router.post('/change-password', async (req: Request, res: Response): Promise<voi
   }
 });
 
+// POST /api/auth/verify-password
+router.post('/verify-password', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { user_id, password } = req.body as { user_id: string; password: string };
+    if (!user_id || !password) {
+      res.status(400).json({ error: 'user_id and password required' });
+      return;
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, password_hash, is_active')
+      .eq('id', user_id)
+      .single();
+
+    if (error || !user || !user.is_active) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+    res.json({ verified: passwordMatch });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to verify password' });
+  }
+});
+
 export default router;
