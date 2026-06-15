@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.formatTermSummary = exports.validateTermForFrequency = exports.TERM_CONFIG = void 0;
+exports.formatTermSummary = exports.validateTermForFrequency = exports.TERM_CONFIG = exports.POYA_DAYS = void 0;
 exports.getFirstCollectionDate = getFirstCollectionDate;
 exports.getNextDueDate = getNextDueDate;
 exports.calculateLoanProduct = calculateLoanProduct;
@@ -9,12 +9,23 @@ const loanTermConfig_1 = require("./loanTermConfig");
 Object.defineProperty(exports, "TERM_CONFIG", { enumerable: true, get: function () { return loanTermConfig_1.TERM_CONFIG; } });
 Object.defineProperty(exports, "validateTermForFrequency", { enumerable: true, get: function () { return loanTermConfig_1.validateTermForFrequency; } });
 Object.defineProperty(exports, "formatTermSummary", { enumerable: true, get: function () { return loanTermConfig_1.formatTermSummary; } });
+// Array of Poya dates or other holidays to skip (YYYY-MM-DD format)
+exports.POYA_DAYS = [
+// Add 2026/2027 Poya days here if known, e.g., '2026-06-29'
+];
+function getNextBusinessDay(date) {
+    let next = (0, date_fns_1.addDays)(date, 1);
+    while ((0, date_fns_1.isWeekend)(next) || exports.POYA_DAYS.includes((0, date_fns_1.format)(next, 'yyyy-MM-dd'))) {
+        next = (0, date_fns_1.addDays)(next, 1);
+    }
+    return next;
+}
 const round2 = (n) => Math.round(n * 100) / 100;
 /** First collection date: always after credit (cash given to customer). */
 function getFirstCollectionDate(creditDate, frequency) {
     switch (frequency) {
         case 'daily':
-            return (0, date_fns_1.addDays)(creditDate, 1);
+            return getNextBusinessDay(creditDate);
         case 'weekly':
             return (0, date_fns_1.addDays)(creditDate, 7);
         case 'biweekly':
@@ -28,7 +39,7 @@ function getFirstCollectionDate(creditDate, frequency) {
 function getNextDueDate(from, frequency) {
     switch (frequency) {
         case 'daily':
-            return (0, date_fns_1.addDays)(from, 1);
+            return getNextBusinessDay(from);
         case 'weekly':
             return (0, date_fns_1.addWeeks)(from, 1);
         case 'biweekly':
@@ -67,7 +78,7 @@ function calculateLoanProduct(input) {
     let durationInMonths;
     switch (frequency) {
         case 'daily':
-            durationInMonths = termCount / 30;
+            durationInMonths = termCount / 20;
             break;
         case 'weekly':
             durationInMonths = termCount / 4;

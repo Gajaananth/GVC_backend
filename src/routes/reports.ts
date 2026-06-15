@@ -32,7 +32,7 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       case 'daily_collection': {
         let query = supabase
           .from('loan_payments')
-          .select(`payment_code, payment_date, amount, payment_type, payment_method, loans!inner(loan_code, branch_id), customers(full_name, customer_code, phone)`)
+          .select(`payment_code, payment_date, amount, payment_type, payment_method, loans!inner(loan_code, branch_id), customers(full_name, customer_code, phone, nic_number)`)
           .gte('payment_date', sDate)
           .lte('payment_date', eDate)
           .order('payment_date', { ascending: false });
@@ -218,18 +218,19 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
       const worksheet = workbook.addWorksheet('Report');
 
       if (type === 'daily_collection') {
-        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans!inner(branch_id)`).gte('payment_date', sDate).lte('payment_date', endOfDayDate);
+        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name, nic_number), loans!inner(branch_id)`).gte('payment_date', sDate).lte('payment_date', endOfDayDate);
         if (req.user?.role !== 'owner') query = query.eq('loans.branch_id', req.user?.branch_id);
         const { data } = await query;
         worksheet.columns = [
           { header: 'Receipt', key: 'payment_code', width: 20 },
           { header: 'Date', key: 'payment_date', width: 15 },
           { header: 'Customer', key: 'customer', width: 30 },
+          { header: 'NIC', key: 'nic', width: 15 },
           { header: 'Type', key: 'payment_type', width: 15 },
           { header: 'Method', key: 'payment_method', width: 15 },
           { header: 'Amount (LKR)', key: 'amount', width: 15 },
         ];
-        (data || []).forEach(p => worksheet.addRow({ ...p, customer: (p as any).customers?.full_name }));
+        (data || []).forEach(p => worksheet.addRow({ ...p, customer: (p as any).customers?.full_name, nic: (p as any).customers?.nic_number || 'N/A' }));
       } else if (type === 'loan_summary') {
         let query = supabase.from('loans').select(`loan_code, status, principal_amount, remaining_balance, customers(full_name)`);
         if (req.user?.role !== 'owner') query = query.eq('branch_id', req.user?.branch_id);
@@ -292,21 +293,22 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
       let rows: any[] = [];
 
       if (type === 'daily_collection') {
-        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name), loans!inner(loan_code, branch_id)`).gte('payment_date', sDate).lte('payment_date', endOfDayDate);
+        let query = supabase.from('loan_payments').select(`payment_code, payment_date, amount, payment_type, payment_method, customers(full_name, nic_number), loans!inner(loan_code, branch_id)`).gte('payment_date', sDate).lte('payment_date', endOfDayDate);
         if (req.user?.role !== 'owner') query = query.eq('loans.branch_id', req.user?.branch_id);
         const { data } = await query;
         columns = [
           { header: 'Receipt', key: 'payment_code', width: 100 },
           { header: 'Date', key: 'payment_date', width: 80 },
-          { header: 'Customer', key: 'customer', width: 150 },
+          { header: 'Customer', key: 'customer', width: 120 },
+          { header: 'NIC', key: 'nic', width: 90 },
           { header: 'Loan', key: 'loan_code', width: 100 },
-          { header: 'Type', key: 'payment_type', width: 80 },
-          { header: 'Method', key: 'payment_method', width: 80 },
-          { header: 'Amount (LKR)', key: 'amount', width: 100, align: 'right' },
+          { header: 'Type', key: 'payment_type', width: 70 },
+          { header: 'Amount', key: 'amount', width: 100, align: 'right' },
         ];
         rows = (data || []).map(p => ({
           ...p,
           customer: (p as any).customers?.full_name,
+          nic: (p as any).customers?.nic_number || 'N/A',
           loan_code: (p as any).loans?.loan_code,
           amount: Number(p.amount).toFixed(2)
         }));

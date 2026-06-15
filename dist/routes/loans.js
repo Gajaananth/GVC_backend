@@ -223,7 +223,7 @@ router.post('/', auth_1.requireAdmin, loanUpload.single('loan_application_pdf'),
             res.status(404).json({ error: 'Customer not found or inactive' });
             return;
         }
-        if (!customer.branch_id) {
+        if (!customer.branch_id && !isOwnerCreator) {
             res.status(400).json({ error: 'Customer branch is not assigned' });
             return;
         }
@@ -231,7 +231,7 @@ router.post('/', auth_1.requireAdmin, loanUpload.single('loan_application_pdf'),
             res.status(403).json({ error: 'Cannot create loans for customers outside your branch' });
             return;
         }
-        const loanBranchId = customer.branch_id;
+        const loanBranchId = customer.branch_id || null;
         const creatorRole = req.user?.role;
         const isOwnerCreation = creatorRole === 'owner';
         const approvalStatus = isOwnerCreation ? 'approved' : 'pending_approval';
@@ -248,7 +248,7 @@ router.post('/', auth_1.requireAdmin, loanUpload.single('loan_application_pdf'),
                 res.status(400).json({ error: 'Applied-by and in-charge must be active staff, branch manager, cashier, admin, or owner users' });
                 return;
             }
-            if (staff.role !== 'owner' && staff.branch_id !== customer.branch_id) {
+            if (staff.role !== 'owner' && customer.branch_id && staff.branch_id !== customer.branch_id) {
                 res.status(400).json({ error: 'Assigned user must belong to the same branch as the customer' });
                 return;
             }

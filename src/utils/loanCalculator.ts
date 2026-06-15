@@ -1,5 +1,18 @@
-import { addDays, addMonths, addWeeks, format, parseISO, differenceInCalendarDays } from 'date-fns';
+import { addDays, addMonths, addWeeks, format, parseISO, differenceInCalendarDays, isWeekend } from 'date-fns';
 import { TERM_CONFIG, validateTermForFrequency, formatTermSummary } from './loanTermConfig';
+
+// Array of Poya dates or other holidays to skip (YYYY-MM-DD format)
+export const POYA_DAYS: string[] = [
+  // Add 2026/2027 Poya days here if known, e.g., '2026-06-29'
+];
+
+function getNextBusinessDay(date: Date): Date {
+  let next = addDays(date, 1);
+  while (isWeekend(next) || POYA_DAYS.includes(format(next, 'yyyy-MM-dd'))) {
+    next = addDays(next, 1);
+  }
+  return next;
+}
 
 export type RepaymentFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
 
@@ -48,7 +61,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export function getFirstCollectionDate(creditDate: Date, frequency: RepaymentFrequency): Date {
   switch (frequency) {
     case 'daily':
-      return addDays(creditDate, 1);
+      return getNextBusinessDay(creditDate);
     case 'weekly':
       return addDays(creditDate, 7);
     case 'biweekly':
@@ -63,7 +76,7 @@ export function getFirstCollectionDate(creditDate: Date, frequency: RepaymentFre
 export function getNextDueDate(from: Date, frequency: RepaymentFrequency): Date {
   switch (frequency) {
     case 'daily':
-      return addDays(from, 1);
+      return getNextBusinessDay(from);
     case 'weekly':
       return addWeeks(from, 1);
     case 'biweekly':
@@ -108,7 +121,7 @@ export function calculateLoanProduct(input: LoanProductInput): LoanProductResult
   let durationInMonths: number;
   switch (frequency) {
     case 'daily':
-      durationInMonths = termCount / 30;
+      durationInMonths = termCount / 20;
       break;
     case 'weekly':
       durationInMonths = termCount / 4;

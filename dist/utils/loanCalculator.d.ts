@@ -1,4 +1,5 @@
 import { TERM_CONFIG, validateTermForFrequency, formatTermSummary } from './loanTermConfig';
+export declare const POYA_DAYS: string[];
 export type RepaymentFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
 export interface LoanProductInput {
     grossLoanAmount: number;
