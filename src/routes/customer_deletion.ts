@@ -40,11 +40,13 @@ router.post('/:id/generate-archive-pdf', async (req: AuthRequest, res: Response)
     const { data: loans } = await supabase.from('loans').select('*').eq('customer_id', customerId).order('created_at', { ascending: false });
     const { data: payments } = await supabase.from('loan_payments').select('*').eq('customer_id', customerId).order('payment_date', { ascending: false });
     const loanIds = (loans || []).map((l: any) => l.id);
-    const { data: schedules } = loanIds.length > 0 ? await supabase.from('loan_schedule').select('*').in('loan_id', loanIds).order('loan_id, installment_number', { ascending: true }) : { data: [] };
+    const { data: schedules } = loanIds.length > 0
+      ? await supabase.from('loan_schedule').select('*').in('loan_id', loanIds).order('loan_id', { ascending: true }).order('installment_number', { ascending: true })
+      : { data: [] };
     const { data: fds } = await supabase.from('fixed_deposits').select('*').eq('customer_id', customerId).order('created_at', { ascending: false });
     const { data: documents } = await supabase.from('customer_documents').select('*').eq('customer_id', customerId).order('uploaded_at', { ascending: false });
 
-    const settings = await getCompanySettings(supabase);
+    const settings = await getCompanySettings();
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=customer-archive-${customerId}.pdf`);
