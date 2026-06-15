@@ -153,7 +153,7 @@ router.post('/fd', requireCustomerAdmin, upload.fields([
     const body = schemaWithoutUrls.parse(parsedBody);
     const branchId = req.user?.role === 'owner' ? body.branch_id : req.user!.branch_id;
 
-    if (!branchId) { res.status(400).json({ error: 'Branch selection is required' }); return; }
+    if (req.user?.role !== 'owner' && !branchId) { res.status(400).json({ error: 'Branch selection is required' }); return; }
 
     const { registered_by_staff_id, assigned_staff_id, ...customerFields } = body;
     const staffId = assigned_staff_id || registered_by_staff_id;
