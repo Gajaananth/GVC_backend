@@ -16,9 +16,9 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
   const { type } = req.params;
   const { start_date, end_date, customer_id } = req.query;
 
-  const today = new Date();
-  const sDate = (start_date as string) || format(startOfMonth(today), 'yyyy-MM-dd');
-  const eDate = (end_date as string) || format(endOfMonth(today), 'yyyy-MM-dd');
+  const sriLankaTime = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000));
+  const sDate = (start_date as string) || format(startOfMonth(sriLankaTime), 'yyyy-MM-dd');
+  const eDate = (end_date as string) || format(endOfMonth(sriLankaTime), 'yyyy-MM-dd');
 
   try {
     if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise'].includes(type)) {
@@ -198,8 +198,9 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
 router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Promise<void> => {
   const { type, format: fileFormat } = req.params;
   const { start_date, end_date } = req.query;
-  const sDate = (start_date as string) || format(startOfMonth(new Date()), 'yyyy-MM-dd');
-  const eDate = (end_date as string) || format(endOfMonth(new Date()), 'yyyy-MM-dd');
+  const sriLankaTime = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000));
+  const sDate = (start_date as string) || format(startOfMonth(sriLankaTime), 'yyyy-MM-dd');
+  const eDate = (end_date as string) || format(endOfMonth(sriLankaTime), 'yyyy-MM-dd');
   const endOfDayDate = `${eDate} 23:59:59`;
 
   try {

@@ -19,7 +19,11 @@ router.use(authenticateJWT);
 const requireStaff = requireRole('staff', 'owner');
 const requireAdminOrOwner = requireRole('owner', 'admin');
 
-const today = () => format(new Date(), 'yyyy-MM-dd');
+const today = () => {
+  const d = new Date();
+  const sriLankaTime = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+  return sriLankaTime.toISOString().split('T')[0];
+};
 
 const staffPaymentSchema = z.object({
   loan_id: z.string().uuid(),
