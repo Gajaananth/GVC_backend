@@ -34,6 +34,7 @@ const import_export_1 = __importDefault(require("./routes/import-export"));
 const search_1 = __importDefault(require("./routes/search"));
 const cron_1 = __importDefault(require("./routes/cron"));
 const fixed_deposits_1 = __importDefault(require("./routes/fixed_deposits"));
+const customer_deletion_1 = __importDefault(require("./routes/customer_deletion"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -56,6 +57,23 @@ const limiter = (0, express_rate_limit_1.default)({
     max: 200,
     message: { error: 'Too many requests, please try again later.' }
 });
+// Health check endpoint - exempt from rate limiting
+app.get('/api/health', (_req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        service: 'GVC Finance API',
+        uptime: process.uptime()
+    });
+});
+// Legacy health endpoint
+app.get('/health', (_req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        service: 'GVC Finance API'
+    });
+});
 app.use('/api/', limiter);
 // Auth endpoints get stricter rate limiting
 const authLimiter = (0, express_rate_limit_1.default)({
@@ -63,22 +81,13 @@ const authLimiter = (0, express_rate_limit_1.default)({
     max: 20,
     message: { error: 'Too many login attempts, please try again later.' }
 });
-app.use('/api/auth/', authLimiter);
 // Body parsing
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
 // Request logging
 app.use(requestLogger_1.requestLogger);
-// Health check
-app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'GVC Finance API' });
-});
-// Root route
-app.get('/', (_req, res) => {
-    res.json({ status: 'ok', message: 'GVC Finance API is running', version: process.env.npm_package_version || 'unknown' });
-});
 // API Routes
-app.use('/api/auth', auth_1.default);
+app.use('/api/auth', authLimiter, auth_1.default);
 app.use('/api/branches', branches_1.default);
 app.use('/api/users', users_1.default);
 app.use('/api/customers', customers_1.default);
@@ -100,6 +109,7 @@ app.use('/api/notifications', notifications_1.default);
 app.use('/api/import-export', import_export_1.default);
 app.use('/api/search', search_1.default);
 app.use('/api/fixed-deposits', fixed_deposits_1.default);
+app.use('/api/customers', customer_deletion_1.default);
 // 404 handler
 app.use((_req, res) => {
     res.status(404).json({ error: 'Route not found' });
