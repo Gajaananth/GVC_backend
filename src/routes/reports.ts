@@ -179,7 +179,7 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
     // Save report snapshot
     await supabase.from('reports').insert({
       report_type: type,
-      report_name: `${type.replace(/_/g, ' ').toUpperCase()} - ${format(today, 'dd MMM yyyy')}`,
+      report_name: `${type.replace(/_/g, ' ').toUpperCase()} - ${format(sriLankaTime, 'dd MMM yyyy')}`,
       period_start: sDate,
       period_end: eDate,
       parameters: { customer_id },
@@ -188,7 +188,7 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
       branch_id: req.user!.branch_id
     });
 
-    res.json({ data: reportData, type, generated_at: today.toISOString() });
+    res.json({ data: reportData, type, generated_at: sriLankaTime.toISOString() });
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate report' });
   }
