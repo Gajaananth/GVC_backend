@@ -645,7 +645,6 @@ router.post('/:id/backdate-payments', requireOwner, async (req: AuthRequest, res
 
     let totalPaid = 0;
     const updatedInstallments: string[] = [];
-    const paymentRecords: any[] = [];
 
     for (const pmt of body.payments) {
       const installment = schedule.find(s => s.installment_number === pmt.installment_number);
@@ -676,34 +675,29 @@ router.post('/:id/backdate-payments', requireOwner, async (req: AuthRequest, res
       const interestShare = Math.round((Number(installment.interest_amount) * proportion) * 100) / 100;
       const principalShare = Math.round((paidAmount - interestShare) * 100) / 100;
 
-      // Create a loan_payments record for history
-      paymentRecords.push({
-        loan_id: loanId,
-        customer_id: loan.customer_id,
-        branch_id: loan.branch_id,
-        payment_date: pmt.paid_date,
-        amount: paidAmount,
-        cash_amount: paidAmount,
-        online_amount: 0,
-        payment_type: 'regular',
-        payment_method: 'cash',
-        principal_paid: principalShare,
-        interest_paid: interestShare,
-        notes: pmt.notes || `Backdated payment for installment #${pmt.installment_number}`,
-        approval_status: 'approved',
-        approved_by: req.user!.id,
-        approved_at: new Date().toISOString(),
-        created_by: req.user!.id,
-      });
-    }
-
-    // Insert payment records
-    if (paymentRecords.length > 0) {
+      // Create a loan_payments record for history — insert individually so one failure doesn't block all
       const { error: payInsertErr } = await supabase
         .from('loan_payments')
-        .insert(paymentRecords);
+        .insert({
+          loan_id: loanId,
+          customer_id: loan.customer_id,
+          branch_id: loan.branch_id,
+          payment_date: pmt.paid_date,
+          amount: delta > 0 ? delta : paidAmount,
+          cash_amount: delta > 0 ? delta : paidAmount,
+          online_amount: 0,
+          payment_type: 'regular',
+          payment_method: 'cash',
+          principal_paid: principalShare,
+          interest_paid: interestShare,
+          notes: `Backdated payment for installment #${pmt.installment_number}`,
+          approval_status: 'approved',
+          approved_by: req.user!.id,
+          approved_at: new Date().toISOString(),
+          created_by: req.user!.id,
+        });
       if (payInsertErr) {
-        console.error('Failed to insert backdated payments:', payInsertErr);
+        console.error(`Failed to insert backdated payment for installment #${pmt.installment_number}:`, payInsertErr);
       }
     }
 
