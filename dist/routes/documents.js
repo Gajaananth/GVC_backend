@@ -11,12 +11,19 @@ const date_fns_1 = require("date-fns");
 const companyConfig_1 = require("../config/companyConfig");
 const exceljs_1 = __importDefault(require("exceljs"));
 const pdfTableGenerator_1 = require("../utils/pdfTableGenerator");
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
-// Helper function to generate PDF headers
+// Helper function to generate PDF headers with logo
 const addHeader = (doc, title, settings) => {
-    doc.fontSize(22).font('Helvetica-Bold').text(settings.company_name, { align: 'center' });
-    doc.fontSize(10).font('Helvetica').text(settings.company_address, { align: 'center' });
+    const logoPath = path_1.default.join(process.cwd(), 'logo.png');
+    if (fs_1.default.existsSync(logoPath)) {
+        doc.image(logoPath, (doc.page.width - 80) / 2, doc.y, { width: 80 });
+        doc.y += 85;
+    }
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#166534').text(settings.company_name, { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#000000').text(settings.company_address, { align: 'center' });
     doc.text(`Tel: ${settings.company_phone} | Email: ${settings.company_email}`, { align: 'center' });
     doc.moveDown(1.5);
     doc.fontSize(16).font('Helvetica-Bold').text(title, { align: 'center' });

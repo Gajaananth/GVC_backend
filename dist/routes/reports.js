@@ -17,9 +17,9 @@ router.use(auth_1.authenticateJWT);
 router.get('/:type', async (req, res) => {
     const { type } = req.params;
     const { start_date, end_date, customer_id } = req.query;
-    const today = new Date();
-    const sDate = start_date || (0, date_fns_1.format)((0, date_fns_1.startOfMonth)(today), 'yyyy-MM-dd');
-    const eDate = end_date || (0, date_fns_1.format)((0, date_fns_1.endOfMonth)(today), 'yyyy-MM-dd');
+    const sriLankaTime = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000));
+    const sDate = start_date || (0, date_fns_1.format)((0, date_fns_1.startOfMonth)(sriLankaTime), 'yyyy-MM-dd');
+    const eDate = end_date || (0, date_fns_1.format)((0, date_fns_1.endOfMonth)(sriLankaTime), 'yyyy-MM-dd');
     try {
         if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise'].includes(type)) {
             res.status(403).json({ error: 'Staff are only permitted to view daily collections and customer-wise reports' });
@@ -166,7 +166,7 @@ router.get('/:type', async (req, res) => {
         // Save report snapshot
         await supabase_1.supabase.from('reports').insert({
             report_type: type,
-            report_name: `${type.replace(/_/g, ' ').toUpperCase()} - ${(0, date_fns_1.format)(today, 'dd MMM yyyy')}`,
+            report_name: `${type.replace(/_/g, ' ').toUpperCase()} - ${(0, date_fns_1.format)(sriLankaTime, 'dd MMM yyyy')}`,
             period_start: sDate,
             period_end: eDate,
             parameters: { customer_id },
@@ -174,7 +174,7 @@ router.get('/:type', async (req, res) => {
             generated_by: req.user.id,
             branch_id: req.user.branch_id
         });
-        res.json({ data: reportData, type, generated_at: today.toISOString() });
+        res.json({ data: reportData, type, generated_at: sriLankaTime.toISOString() });
     }
     catch (err) {
         res.status(500).json({ error: 'Failed to generate report' });
@@ -184,8 +184,9 @@ router.get('/:type', async (req, res) => {
 router.get('/:type/export/:format', async (req, res) => {
     const { type, format: fileFormat } = req.params;
     const { start_date, end_date } = req.query;
-    const sDate = start_date || (0, date_fns_1.format)((0, date_fns_1.startOfMonth)(new Date()), 'yyyy-MM-dd');
-    const eDate = end_date || (0, date_fns_1.format)((0, date_fns_1.endOfMonth)(new Date()), 'yyyy-MM-dd');
+    const sriLankaTime = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000));
+    const sDate = start_date || (0, date_fns_1.format)((0, date_fns_1.startOfMonth)(sriLankaTime), 'yyyy-MM-dd');
+    const eDate = end_date || (0, date_fns_1.format)((0, date_fns_1.endOfMonth)(sriLankaTime), 'yyyy-MM-dd');
     const endOfDayDate = `${eDate} 23:59:59`;
     try {
         if (!req.user) {

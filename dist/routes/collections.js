@@ -12,7 +12,11 @@ const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
 const requireStaff = (0, auth_1.requireRole)('staff', 'owner');
 const requireAdminOrOwner = (0, auth_1.requireRole)('owner', 'admin');
-const today = () => (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
+const today = () => {
+    const d = new Date();
+    const sriLankaTime = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+    return sriLankaTime.toISOString().split('T')[0];
+};
 const staffPaymentSchema = zod_1.z.object({
     loan_id: zod_1.z.string().uuid(),
     amount: zod_1.z.number().positive(),

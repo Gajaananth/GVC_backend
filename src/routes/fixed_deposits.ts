@@ -118,29 +118,41 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
     const branchId = customer.branch_id;
 
+    // Non-owner roles must have a valid branch
+    if (req.user!.role !== 'owner' && !branchId) {
+      res.status(400).json({ error: 'Customer does not have a branch assigned. Please assign a branch to the customer first.' });
+      return;
+    }
+
     const isOwner = req.user!.role === 'owner';
     const status = isOwner ? 'active' : 'pending';
     const approvedBy = isOwner ? req.user!.id : null;
     const approvedAt = isOwner ? new Date().toISOString() : null;
 
+    // Build insert object — only include branch_id when it has a value
+    // Owner can create FDs for customers without a branch
+    const insertData: Record<string, any> = {
+      fd_code: fdCode,
+      customer_id: body.customer_id,
+      principal_amount: body.principal_amount,
+      interest_rate: body.interest_rate,
+      term_months: body.term_months,
+      maturity_date: maturityDate.toISOString().split('T')[0],
+      status: status,
+      payout_method: body.payout_method,
+      total_maturity_amount: totalMaturityAmount,
+      notes: body.notes,
+      created_by: req.user!.id,
+      approved_by: approvedBy,
+      approved_at: approvedAt
+    };
+    if (branchId) {
+      insertData.branch_id = branchId;
+    }
+
     const { data, error } = await supabase
       .from('fixed_deposits')
-      .insert({
-        fd_code: fdCode,
-        customer_id: body.customer_id,
-        branch_id: branchId,
-        principal_amount: body.principal_amount,
-        interest_rate: body.interest_rate,
-        term_months: body.term_months,
-        maturity_date: maturityDate.toISOString().split('T')[0],
-        status: status,
-        payout_method: body.payout_method,
-        total_maturity_amount: totalMaturityAmount,
-        notes: body.notes,
-        created_by: req.user!.id,
-        approved_by: approvedBy,
-        approved_at: approvedAt
-      })
+      .insert(insertData)
       .select()
       .single();
 

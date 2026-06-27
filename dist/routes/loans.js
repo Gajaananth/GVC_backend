@@ -16,6 +16,52 @@ const uuid_1 = require("uuid");
 const path_1 = __importDefault(require("path"));
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticateJWT);
+router.post('/heal-receipts', async (req, res) => {
+    try {
+        // Find all schedule rows that have a paid_amount > 0
+        const { data: schedule } = await supabase_1.supabase
+            .from('loan_schedule')
+            .select('*, loans(customer_id, branch_id)')
+            .gt('paid_amount', 0);
+        if (!schedule)
+            return res.json({ message: 'No schedule found' });
+        let healed = 0;
+        for (const s of schedule) {
+            // Check if a payment record exists with this date or note
+            const { data: payments } = await supabase_1.supabase
+                .from('loan_payments')
+                .select('id')
+                .eq('loan_id', s.loan_id)
+                .or(`notes.ilike.%installment #${s.installment_number}%, payment_date.eq.${s.paid_date}`);
+            if (!payments || payments.length === 0) {
+                // Create missing payment
+                await supabase_1.supabase.from('loan_payments').insert({
+                    loan_id: s.loan_id,
+                    customer_id: s.loans.customer_id,
+                    branch_id: s.loans.branch_id,
+                    payment_date: s.paid_date || new Date().toISOString(),
+                    amount: s.paid_amount,
+                    cash_amount: s.paid_amount,
+                    online_amount: 0,
+                    payment_type: 'regular',
+                    payment_method: 'cash',
+                    principal_paid: s.paid_amount, // roughly
+                    interest_paid: 0,
+                    notes: `Recovered backdated payment for installment #${s.installment_number}`,
+                    approval_status: 'approved',
+                    approved_by: req.user.id,
+                    approved_at: new Date().toISOString(),
+                    created_by: req.user.id
+                });
+                healed++;
+            }
+        }
+        res.json({ message: `Healed ${healed} missing payment records` });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 const loanUpload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 },
@@ -612,7 +658,6 @@ router.post('/:id/backdate-payments', auth_1.requireOwner, async (req, res) => {
         }
         let totalPaid = 0;
         const updatedInstallments = [];
-        const paymentRecords = [];
         for (const pmt of body.payments) {
             const installment = schedule.find(s => s.installment_number === pmt.installment_number);
             if (!installment) {
@@ -621,6 +666,8 @@ router.post('/:id/backdate-payments', auth_1.requireOwner, async (req, res) => {
             }
             const installmentAmount = Number(installment.installment_amount);
             const paidAmount = pmt.paid_amount;
+            const oldPaidAmount = Number(installment.paid_amount || 0);
+            const delta = Math.max(0, paidAmount - oldPaidAmount);
             const newStatus = paidAmount >= installmentAmount ? 'paid' : 'partial';
             // Update the schedule row
             await supabase_1.supabase.from('loan_schedule').update({
@@ -629,38 +676,34 @@ router.post('/:id/backdate-payments', auth_1.requireOwner, async (req, res) => {
                 paid_date: pmt.paid_date,
             }).eq('id', installment.id);
             updatedInstallments.push(installment.id);
-            totalPaid += paidAmount;
+            totalPaid += delta;
             // Calculate interest/principal split
             const proportion = installmentAmount > 0 ? Math.min(paidAmount / installmentAmount, 1) : 0;
             const interestShare = Math.round((Number(installment.interest_amount) * proportion) * 100) / 100;
             const principalShare = Math.round((paidAmount - interestShare) * 100) / 100;
-            // Create a loan_payments record for history
-            paymentRecords.push({
+            // Create a loan_payments record for history — insert individually so one failure doesn't block all
+            const { error: payInsertErr } = await supabase_1.supabase
+                .from('loan_payments')
+                .insert({
                 loan_id: loanId,
                 customer_id: loan.customer_id,
                 branch_id: loan.branch_id,
                 payment_date: pmt.paid_date,
-                amount: paidAmount,
-                cash_amount: paidAmount,
+                amount: delta > 0 ? delta : paidAmount,
+                cash_amount: delta > 0 ? delta : paidAmount,
                 online_amount: 0,
                 payment_type: 'regular',
                 payment_method: 'cash',
                 principal_paid: principalShare,
                 interest_paid: interestShare,
-                notes: pmt.notes || `Backdated payment for installment #${pmt.installment_number}`,
+                notes: `Backdated payment for installment #${pmt.installment_number}`,
                 approval_status: 'approved',
                 approved_by: req.user.id,
                 approved_at: new Date().toISOString(),
                 created_by: req.user.id,
             });
-        }
-        // Insert payment records
-        if (paymentRecords.length > 0) {
-            const { error: payInsertErr } = await supabase_1.supabase
-                .from('loan_payments')
-                .insert(paymentRecords);
             if (payInsertErr) {
-                console.error('Failed to insert backdated payments:', payInsertErr);
+                console.error(`Failed to insert backdated payment for installment #${pmt.installment_number}:`, payInsertErr);
             }
         }
         // Update loan balances

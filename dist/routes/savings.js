@@ -101,9 +101,15 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
             res.status(403).json({ error: 'Cannot create savings account for a customer in another branch' });
             return;
         }
+        // Build insert object — only include branch_id when it has a value
+        // Owner can create savings for customers without a branch
+        const insertData = { ...body, created_by: user.id };
+        if (customer.branch_id) {
+            insertData.branch_id = customer.branch_id;
+        }
         const { data, error } = await supabase_1.supabase
             .from('savings_accounts')
-            .insert({ ...body, branch_id: customer.branch_id, created_by: user.id })
+            .insert(insertData)
             .select()
             .single();
         if (error) {

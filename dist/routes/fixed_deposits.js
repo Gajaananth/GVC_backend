@@ -110,16 +110,20 @@ router.post('/', async (req, res) => {
             return;
         }
         const branchId = customer.branch_id;
+        // Non-owner roles must have a valid branch
+        if (req.user.role !== 'owner' && !branchId) {
+            res.status(400).json({ error: 'Customer does not have a branch assigned. Please assign a branch to the customer first.' });
+            return;
+        }
         const isOwner = req.user.role === 'owner';
         const status = isOwner ? 'active' : 'pending';
         const approvedBy = isOwner ? req.user.id : null;
         const approvedAt = isOwner ? new Date().toISOString() : null;
-        const { data, error } = await supabase_1.supabase
-            .from('fixed_deposits')
-            .insert({
+        // Build insert object — only include branch_id when it has a value
+        // Owner can create FDs for customers without a branch
+        const insertData = {
             fd_code: fdCode,
             customer_id: body.customer_id,
-            branch_id: branchId,
             principal_amount: body.principal_amount,
             interest_rate: body.interest_rate,
             term_months: body.term_months,
@@ -131,7 +135,13 @@ router.post('/', async (req, res) => {
             created_by: req.user.id,
             approved_by: approvedBy,
             approved_at: approvedAt
-        })
+        };
+        if (branchId) {
+            insertData.branch_id = branchId;
+        }
+        const { data, error } = await supabase_1.supabase
+            .from('fixed_deposits')
+            .insert(insertData)
             .select()
             .single();
         if (error) {

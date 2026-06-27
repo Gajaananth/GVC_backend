@@ -111,9 +111,16 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
+    // Build insert object — only include branch_id when it has a value
+    // Owner can create savings for customers without a branch
+    const insertData: Record<string, any> = { ...body, created_by: user.id };
+    if (customer.branch_id) {
+      insertData.branch_id = customer.branch_id;
+    }
+
     const { data, error } = await supabase
       .from('savings_accounts')
-      .insert({ ...body, branch_id: customer.branch_id, created_by: user.id })
+      .insert(insertData)
       .select()
       .single();
 
