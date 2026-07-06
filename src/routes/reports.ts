@@ -21,8 +21,8 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
   const eDate = (end_date as string) || format(endOfMonth(sriLankaTime), 'yyyy-MM-dd');
 
   try {
-    if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise'].includes(type)) {
-      res.status(403).json({ error: 'Staff are only permitted to view daily collections and customer-wise reports' });
+    if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise', 'arrears_report'].includes(type)) {
+      res.status(403).json({ error: 'Staff are only permitted to view daily collections, customer-wise, and arrears reports' });
       return;
     }
 
@@ -171,22 +171,61 @@ router.get('/:type', async (req: AuthRequest, res: Response): Promise<void> => {
         break;
       }
 
+      case 'arrears_report': {
+        let query = supabase
+          .from('loan_schedule')
+          .select(`
+            id, due_date, installment_amount, paid_amount, status,
+            loans!inner(id, loan_code, branch_id, customers!inner(id, full_name, nic_number, photo_url))
+          `)
+          .in('status', ['pending', 'partial', 'overdue'])
+          .lte('due_date', sriLankaTime.toISOString().split('T')[0]);
+
+        if (start_date) query = query.gte('due_date', sDate);
+        if (end_date) query = query.lte('due_date', eDate);
+
+        if (req.user?.role !== 'owner') {
+          query = query.eq('loans.branch_id', req.user?.branch_id);
+        }
+
+        const { data } = await query;
+
+        const arrearsData = (data || []).map((row: any) => {
+          const arrears_amount = Number(row.installment_amount) - Number(row.paid_amount || 0);
+          return {
+            ...row,
+            arrears_amount,
+            customer_name: row.loans?.customers?.full_name,
+            nic: row.loans?.customers?.nic_number,
+            photo_url: row.loans?.customers?.photo_url,
+            loan_code: row.loans?.loan_code
+          };
+        }).filter(item => item.arrears_amount > 0);
+
+        const totalArrears = arrearsData.reduce((s: number, i: any) => s + i.arrears_amount, 0);
+
+        reportData = { arrears_list: arrearsData, total_arrears: totalArrears, period: { start: sDate, end: eDate } };
+        break;
+      }
+
       default:
         res.status(400).json({ error: `Unknown report type: ${type}` });
         return;
     }
 
     // Save report snapshot
-    await supabase.from('reports').insert({
-      report_type: type,
-      report_name: `${type.replace(/_/g, ' ').toUpperCase()} - ${format(sriLankaTime, 'dd MMM yyyy')}`,
-      period_start: sDate,
-      period_end: eDate,
-      parameters: { customer_id },
-      data: reportData as Record<string, unknown>,
-      generated_by: req.user!.id,
-      branch_id: req.user!.branch_id
-    });
+    if (type !== 'arrears_report') {
+      await supabase.from('reports').insert({
+        report_type: type,
+        report_name: `${type.replace(/_/g, ' ').toUpperCase()} - ${format(sriLankaTime, 'dd MMM yyyy')}`,
+        period_start: sDate,
+        period_end: eDate,
+        parameters: { customer_id },
+        data: reportData as Record<string, unknown>,
+        generated_by: req.user!.id,
+        branch_id: req.user!.branch_id
+      });
+    }
 
     res.json({ data: reportData, type, generated_at: sriLankaTime.toISOString() });
   } catch (err) {
@@ -209,8 +248,8 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
       return;
     }
 
-    if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise'].includes(type)) {
-      res.status(403).json({ error: 'Staff are only permitted to export daily collections and customer-wise reports' });
+    if (req.user?.role === 'staff' && !['daily_collection', 'customer_wise', 'arrears_report'].includes(type)) {
+      res.status(403).json({ error: 'Staff are only permitted to export daily collections, customer-wise, and arrears reports' });
       return;
     }
 
@@ -267,6 +306,37 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
           { header: 'Remaining Balance', key: 'remaining_balance', width: 20 },
         ];
         (data || []).forEach(l => worksheet.addRow(l));
+      } else if (type === 'arrears_report') {
+        let query = supabase.from('loan_schedule')
+          .select(`id, due_date, installment_amount, paid_amount, status, loans!inner(loan_code, branch_id, customers!inner(full_name, nic_number, photo_url))`)
+          .in('status', ['pending', 'partial', 'overdue'])
+          .lte('due_date', sriLankaTime.toISOString().split('T')[0]);
+        if (start_date) query = query.gte('due_date', sDate);
+        if (end_date) query = query.lte('due_date', eDate);
+        if (req.user?.role !== 'owner') query = query.eq('loans.branch_id', req.user?.branch_id);
+        const { data } = await query;
+
+        worksheet.columns = [
+          { header: 'Loan Code', key: 'loan_code', width: 20 },
+          { header: 'Customer', key: 'customer_name', width: 30 },
+          { header: 'NIC', key: 'nic', width: 20 },
+          { header: 'Due Date', key: 'due_date', width: 15 },
+          { header: 'Arrears (LKR)', key: 'arrears_amount', width: 20 },
+          { header: 'Photo URL', key: 'photo_url', width: 40 },
+        ];
+        (data || []).forEach((row: any) => {
+          const arr_amt = Number(row.installment_amount) - Number(row.paid_amount || 0);
+          if (arr_amt > 0) {
+            worksheet.addRow({
+              loan_code: row.loans?.loan_code,
+              customer_name: row.loans?.customers?.full_name,
+              nic: row.loans?.customers?.nic_number,
+              due_date: row.due_date,
+              arrears_amount: arr_amt,
+              photo_url: row.loans?.customers?.photo_url || 'N/A'
+            });
+          }
+        });
       } else {
          worksheet.addRow(['Export data available in JSON format, basic Excel provided']);
       }
@@ -380,6 +450,38 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
           savings: (c as any).savings_accounts?.length || 0,
           fds: (c as any).fixed_deposits?.length || 0,
         }));
+      } else if (type === 'arrears_report') {
+        let query = supabase.from('loan_schedule')
+          .select(`id, due_date, installment_amount, paid_amount, status, loans!inner(loan_code, branch_id, customers!inner(full_name, nic_number, photo_url))`)
+          .in('status', ['pending', 'partial', 'overdue'])
+          .lte('due_date', sriLankaTime.toISOString().split('T')[0]);
+        if (start_date) query = query.gte('due_date', sDate);
+        if (end_date) query = query.lte('due_date', eDate);
+        if (req.user?.role !== 'owner') query = query.eq('loans.branch_id', req.user?.branch_id);
+        const { data } = await query;
+        
+        columns = [
+          { header: 'Loan Code', key: 'loan_code', width: 80 },
+          { header: 'Customer', key: 'customer', width: 150 },
+          { header: 'NIC', key: 'nic', width: 100 },
+          { header: 'Due Date', key: 'due_date', width: 80 },
+          { header: 'Arrears (LKR)', key: 'arrears', width: 100, align: 'right' },
+          { header: 'Photo URL', key: 'photo', width: 150 },
+        ];
+        
+        (data || []).forEach((row: any) => {
+          const arr_amt = Number(row.installment_amount) - Number(row.paid_amount || 0);
+          if (arr_amt > 0) {
+            rows.push({
+              loan_code: row.loans?.loan_code,
+              customer: row.loans?.customers?.full_name,
+              nic: row.loans?.customers?.nic_number,
+              due_date: row.due_date,
+              arrears: arr_amt.toFixed(2),
+              photo: row.loans?.customers?.photo_url ? 'Available (See system)' : 'N/A'
+            });
+          }
+        });
       }
 
       if (columns.length > 0 && rows.length > 0) {
