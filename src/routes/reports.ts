@@ -324,9 +324,11 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
           { header: 'Arrears (LKR)', key: 'arrears_amount', width: 20 },
           { header: 'Photo URL', key: 'photo_url', width: 40 },
         ];
+        let total_arrears = 0;
         (data || []).forEach((row: any) => {
           const arr_amt = Number(row.installment_amount) - Number(row.paid_amount || 0);
           if (arr_amt > 0) {
+            total_arrears += arr_amt;
             worksheet.addRow({
               loan_code: row.loans?.loan_code,
               customer_name: row.loans?.customers?.full_name,
@@ -337,6 +339,8 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
             });
           }
         });
+        worksheet.addRow({});
+        worksheet.addRow({ due_date: 'TOTAL ARREARS:', arrears_amount: total_arrears });
       } else {
          worksheet.addRow(['Export data available in JSON format, basic Excel provided']);
       }
@@ -469,9 +473,11 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
           { header: 'Photo URL', key: 'photo', width: 150 },
         ];
         
+        let total_arrears = 0;
         (data || []).forEach((row: any) => {
           const arr_amt = Number(row.installment_amount) - Number(row.paid_amount || 0);
           if (arr_amt > 0) {
+            total_arrears += arr_amt;
             rows.push({
               loan_code: row.loans?.loan_code,
               customer: row.loans?.customers?.full_name,
@@ -481,6 +487,14 @@ router.get('/:type/export/:format', async (req: AuthRequest, res: Response): Pro
               photo: row.loans?.customers?.photo_url ? 'Available (See system)' : 'N/A'
             });
           }
+        });
+        rows.push({
+          loan_code: '',
+          customer: '',
+          nic: '',
+          due_date: 'TOTAL:',
+          arrears: total_arrears.toFixed(2),
+          photo: ''
         });
       }
 
