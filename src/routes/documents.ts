@@ -539,9 +539,7 @@ router.get('/statement/savings/:account_id', async (req: AuthRequest, res: Respo
         balance: Number(tx.balance_after).toLocaleString('en-US', { minimumFractionDigits: 2 })
       };
     });
-
-    drawTable(doc, 50, doc.y, columns, rows);
-
+    drawTable(doc, columns, rows, settings, 'SAVINGS ACCOUNT STATEMENT', 'Transaction Ledger');
     doc.moveDown();
     doc.font('Helvetica-Bold').text(`Closing Balance: LKR ${Number(account.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, { align: 'right' });
 
@@ -678,7 +676,7 @@ router.get('/arrears/:loan_id', async (req: AuthRequest, res: Response): Promise
     if (rows.length === 0) {
       doc.text("No arrears found for this loan.", { align: 'center' });
     } else {
-      drawTable(doc, 50, doc.y, columns, rows);
+      drawTable(doc, columns, rows, settings, 'LOAN ARREARS REPORT', 'Arrears Ledger');
       doc.moveDown();
       doc.font('Helvetica-Bold').fillColor('#b91c1c').text(`Total Arrears Amount: LKR ${totalArrears.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, { align: 'right' });
     }
