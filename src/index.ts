@@ -1,3 +1,6 @@
+// Set Global Timezone to Sri Lanka BEFORE any dates or libraries are loaded
+process.env.TZ = 'Asia/Colombo';
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
