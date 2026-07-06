@@ -613,4 +613,80 @@ router.get('/statement/savings/:account_id/excel', async (req: AuthRequest, res:
   }
 });
 
+// GET /api/documents/arrears/:loan_id
+router.get('/arrears/:loan_id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
+    const { data: loan } = await supabase
+      .from('loans')
+      .select('*, customers(*), loan_installments(*)')
+      .eq('id', req.params.loan_id)
+      .single();
+
+    if (!loan) { res.status(404).json({ error: 'Loan not found' }); return; }
+    if (user.role !== 'owner' && loan.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Access denied' }); return;
+    }
+
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const overdueInstallments = (loan.loan_installments || [])
+      .filter((s: any) => ['pending', 'partial', 'overdue'].includes(s.status) && s.due_date <= todayStr)
+      .sort((a: any, b: any) => a.installment_number - b.installment_number);
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="arrears_report_${loan.loan_code}.pdf"`);
+    doc.pipe(res);
+
+    addStandardHeader(doc, 'LOAN ARREARS REPORT', settings);
+
+    doc.fontSize(10).font('Helvetica-Bold').text('Customer Details', 50, doc.y);
+    doc.font('Helvetica').text(`Name: ${loan.customers?.full_name}`);
+    doc.text(`NIC: ${loan.customers?.nic_number}`);
+    
+    const rightCol = 350;
+    doc.font('Helvetica-Bold').text('Loan Details', rightCol, doc.y - 24);
+    doc.font('Helvetica').text(`Loan Code: ${loan.loan_code}`, rightCol);
+    doc.text(`Principal: LKR ${Number(loan.principal_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, rightCol);
+    
+    doc.moveDown(2);
+
+    const columns: PDFTableColumn[] = [
+      { header: 'Inst. #', key: 'inst_num', width: 60 },
+      { header: 'Due Date', key: 'due_date', width: 100 },
+      { header: 'Due Amt (LKR)', key: 'due_amt', width: 100, align: 'right' },
+      { header: 'Paid Amt (LKR)', key: 'paid_amt', width: 100, align: 'right' },
+      { header: 'Arrears (LKR)', key: 'arrears', width: 100, align: 'right' }
+    ];
+
+    let totalArrears = 0;
+    const rows = overdueInstallments.map((s: any) => {
+      const arr = Number(s.installment_amount) - Number(s.paid_amount || 0);
+      totalArrears += arr;
+      return {
+        inst_num: s.installment_number.toString(),
+        due_date: format(new Date(s.due_date), 'yyyy-MM-dd'),
+        due_amt: Number(s.installment_amount).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        paid_amt: Number(s.paid_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        arrears: arr.toLocaleString('en-US', { minimumFractionDigits: 2 })
+      };
+    });
+
+    if (rows.length === 0) {
+      doc.text("No arrears found for this loan.", { align: 'center' });
+    } else {
+      drawTable(doc, 50, doc.y, columns, rows);
+      doc.moveDown();
+      doc.font('Helvetica-Bold').fillColor('#b91c1c').text(`Total Arrears Amount: LKR ${totalArrears.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, { align: 'right' });
+    }
+
+    doc.end();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
