@@ -414,4 +414,203 @@ router.get('/loan-schedule/:id/excel', async (req: AuthRequest, res: Response): 
   }
 });
 
+
+// GET /api/documents/receipt/savings/:tx_id
+router.get('/receipt/savings/:tx_id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
+    const { data: tx } = await supabase
+      .from('savings_transactions')
+      .select('*, savings_accounts(account_code, branch_id), customers(full_name, nic_number, customer_code), branches(name), users!savings_transactions_created_by_fkey(full_name)')
+      .eq('id', req.params.tx_id)
+      .single();
+
+    if (!tx) { res.status(404).json({ error: 'Transaction not found' }); return; }
+    if (user.role !== 'owner' && tx.savings_accounts?.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Access denied' }); return;
+    }
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 50, size: [300, 500] });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="receipt_${tx.transaction_code}.pdf"`);
+    doc.pipe(res);
+
+    const logoPath = path.join(process.cwd(), 'logo.png');
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, (300 - 60) / 2, doc.y, { width: 60 });
+      doc.moveDown(4);
+    }
+
+    doc.fontSize(14).font('Helvetica-Bold').text(settings.company_name, { align: 'center' });
+    doc.fontSize(8).font('Helvetica').text(settings.company_address, { align: 'center' });
+    doc.text(settings.company_phone, { align: 'center' });
+    doc.moveDown();
+    
+    doc.fontSize(12).font('Helvetica-Bold').text(`CASH ${tx.transaction_type.toUpperCase()} RECEIPT`, { align: 'center' });
+    doc.moveDown();
+
+    const addRow = (label: string, value: string) => {
+      doc.fontSize(9).font('Helvetica-Bold').text(label, { continued: true });
+      doc.font('Helvetica').text(` : ${value}`);
+      doc.moveDown(0.5);
+    };
+
+    addRow('Receipt No', tx.transaction_code);
+    addRow('Date', format(new Date(tx.created_at || tx.transaction_date), 'yyyy-MM-dd HH:mm:ss'));
+    addRow('Customer', tx.customers?.full_name || 'N/A');
+    addRow('Account No', tx.savings_accounts?.account_code || 'N/A');
+    if (tx.branches?.name) addRow('Branch', tx.branches.name);
+    
+    doc.moveDown();
+    doc.fontSize(14).font('Helvetica-Bold').text(`Amount: LKR ${Number(tx.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
+    doc.fontSize(10).font('Helvetica').text(`New Balance: LKR ${Number(tx.balance_after).toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
+    
+    doc.moveDown(2);
+    doc.fontSize(8).text('----------------------------------', { align: 'center' });
+    doc.text(`Processed By: ${tx.users?.full_name || 'System'}`, { align: 'center' });
+    doc.text('Thank you for banking with us!', { align: 'center' });
+
+    doc.end();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/documents/statement/savings/:account_id
+router.get('/statement/savings/:account_id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
+    const { data: account } = await supabase
+      .from('savings_accounts')
+      .select('*, customers(*)')
+      .eq('id', req.params.account_id)
+      .single();
+
+    if (!account) { res.status(404).json({ error: 'Account not found' }); return; }
+    if (user.role !== 'owner' && account.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Access denied' }); return;
+    }
+
+    const { data: transactions } = await supabase
+      .from('savings_transactions')
+      .select('*')
+      .eq('account_id', account.id)
+      .order('created_at', { ascending: true });
+
+    const settings = await getCompanySettings();
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="savings_statement_${account.account_code}.pdf"`);
+    doc.pipe(res);
+
+    addStandardHeader(doc, 'SAVINGS ACCOUNT STATEMENT', settings);
+
+    doc.fontSize(10).font('Helvetica-Bold').text('Customer Details', 50, doc.y);
+    doc.font('Helvetica').text(`Name: ${account.customers?.full_name}`);
+    doc.text(`NIC/Code: ${account.customers?.nic_number} / ${account.customers?.customer_code}`);
+    
+    const rightCol = 350;
+    doc.font('Helvetica-Bold').text('Account Details', rightCol, doc.y - 24);
+    doc.font('Helvetica').text(`Account No: ${account.account_code}`, rightCol);
+    doc.text(`Account Type: ${account.account_type.toUpperCase()}`, rightCol);
+    
+    doc.moveDown(2);
+
+    const columns: PDFTableColumn[] = [
+      { header: 'Date', key: 'date', width: 80 },
+      { header: 'Description', key: 'desc', width: 150 },
+      { header: 'Deposit (LKR)', key: 'deposit', width: 90, align: 'right' },
+      { header: 'Withdraw (LKR)', key: 'withdraw', width: 90, align: 'right' },
+      { header: 'Balance (LKR)', key: 'balance', width: 90, align: 'right' }
+    ];
+
+    const rows = (transactions || []).map(tx => {
+      const isDeposit = tx.transaction_type === 'deposit' || tx.transaction_type === 'interest';
+      return {
+        date: format(new Date(tx.created_at || tx.transaction_date), 'yyyy-MM-dd'),
+        desc: tx.transaction_type.toUpperCase() + (tx.description ? ` - ${tx.description.substring(0, 20)}` : ''),
+        deposit: isDeposit ? Number(tx.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-',
+        withdraw: !isDeposit ? Number(tx.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-',
+        balance: Number(tx.balance_after).toLocaleString('en-US', { minimumFractionDigits: 2 })
+      };
+    });
+
+    drawTable(doc, 50, doc.y, columns, rows);
+
+    doc.moveDown();
+    doc.font('Helvetica-Bold').text(`Closing Balance: LKR ${Number(account.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, { align: 'right' });
+
+    doc.end();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/documents/statement/savings/:account_id/excel
+router.get('/statement/savings/:account_id/excel', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
+    const { data: account } = await supabase
+      .from('savings_accounts')
+      .select('*, customers(*)')
+      .eq('id', req.params.account_id)
+      .single();
+
+    if (!account) { res.status(404).json({ error: 'Account not found' }); return; }
+    if (user.role !== 'owner' && account.branch_id !== user.branch_id) {
+      res.status(403).json({ error: 'Access denied' }); return;
+    }
+
+    const { data: transactions } = await supabase
+      .from('savings_transactions')
+      .select('*')
+      .eq('account_id', account.id)
+      .order('created_at', { ascending: true });
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Savings Statement');
+
+    sheet.columns = [
+      { header: 'Date', key: 'date', width: 15 },
+      { header: 'Time', key: 'time', width: 15 },
+      { header: 'Transaction Type', key: 'type', width: 20 },
+      { header: 'Description', key: 'desc', width: 30 },
+      { header: 'Deposit Amount', key: 'deposit', width: 15 },
+      { header: 'Withdrawal Amount', key: 'withdraw', width: 15 },
+      { header: 'Balance', key: 'balance', width: 15 },
+    ];
+
+    sheet.getRow(1).font = { bold: true };
+
+    (transactions || []).forEach(tx => {
+      const isDeposit = tx.transaction_type === 'deposit' || tx.transaction_type === 'interest';
+      const dt = new Date(tx.created_at || tx.transaction_date);
+      sheet.addRow({
+        date: format(dt, 'yyyy-MM-dd'),
+        time: format(dt, 'HH:mm:ss'),
+        type: tx.transaction_type.toUpperCase(),
+        desc: tx.description || '',
+        deposit: isDeposit ? tx.amount : '',
+        withdraw: !isDeposit ? tx.amount : '',
+        balance: tx.balance_after
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="savings_statement_${account.account_code}.xlsx"`);
+    
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
