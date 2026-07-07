@@ -181,7 +181,45 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
   const { data, error, count } = await query;
   if (error) { res.status(500).json({ error: error.message }); return; }
-  res.json({ data, total: count, page: pageNum, limit: limitNum, totalPages: Math.ceil((count || 0) / limitNum) });
+
+  const loans = data || [];
+  const loanIds = loans.map((loan: any) => loan.id);
+  let schedules: any[] = [];
+
+  if (loanIds.length > 0) {
+    const todayDate = format(new Date(), 'yyyy-MM-dd');
+    const { data: scheduleData, error: scheduleError } = await supabase
+      .from('loan_schedule')
+      .select('loan_id, installment_amount, paid_amount, due_date, status')
+      .in('loan_id', loanIds)
+      .in('status', ['pending', 'partial', 'overdue'])
+      .lte('due_date', todayDate);
+
+    if (scheduleError) {
+      res.status(500).json({ error: scheduleError.message });
+      return;
+    }
+    schedules = scheduleData || [];
+  }
+
+  const schedulesByLoanId = schedules.reduce((acc: Record<string, any[]>, item: any) => {
+    if (!acc[item.loan_id]) acc[item.loan_id] = [];
+    acc[item.loan_id].push(item);
+    return acc;
+  }, {});
+
+  const loansWithArrears = loans.map((loan: any) => {
+    const overdueSchedules = schedulesByLoanId[loan.id] || [];
+    const arrears_amount = overdueSchedules.reduce((sum: number, schedule: any) => {
+      return sum + (Number(schedule.installment_amount) - Number(schedule.paid_amount || 0));
+    }, 0);
+    return {
+      ...loan,
+      arrears_amount: Number(arrears_amount.toFixed(2)),
+    };
+  });
+
+  res.json({ data: loansWithArrears, total: count, page: pageNum, limit: limitNum, totalPages: Math.ceil((count || 0) / limitNum) });
 });
 
 // GET /api/loans/:id
