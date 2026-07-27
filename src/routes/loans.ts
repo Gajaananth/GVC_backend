@@ -381,6 +381,7 @@ router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'),
       res.status(400).json({ error: 'Validation error', details: err.errors });
       return;
     }
+    console.error('[POST /adjustments] Error:', err);
     const message = err instanceof Error ? err.message : 'Failed to apply adjustment';
     res.status(500).json({ error: message });
   }
