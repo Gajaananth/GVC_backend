@@ -9,6 +9,7 @@ import { generateLoanApplicationPDF, uploadLoanFormPDF } from '../utils/pdfGener
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import bcrypt from 'bcryptjs';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -384,6 +385,88 @@ router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'),
     console.error('[POST /adjustments] Error:', err);
     const message = err instanceof Error ? err.message : 'Failed to apply adjustment';
     res.status(500).json({ error: message });
+  }
+});
+
+// DELETE /api/loans/:id/adjustments/:adjustmentId — Owner only, requires password confirmation
+const reverseAdjustmentSchema = z.object({
+  owner_password: z.string().min(1)
+});
+
+router.delete('/:id/adjustments/:adjustmentId', requireOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id: loanId, adjustmentId } = req.params;
+    const body = reverseAdjustmentSchema.parse(req.body);
+
+    // Verify owner password
+    const { data: ownerUser } = await supabase
+      .from('users')
+      .select('password_hash')
+      .eq('id', req.user!.id)
+      .single();
+    if (!ownerUser) { res.status(404).json({ error: 'Owner not found' }); return; }
+    const isValid = await bcrypt.compare(body.owner_password, ownerUser.password_hash);
+    if (!isValid) { res.status(403).json({ error: 'Incorrect password' }); return; }
+
+    // Fetch adjustment
+    const { data: adjustment, error: adjFetchErr } = await supabase
+      .from('loan_adjustments')
+      .select('*')
+      .eq('id', adjustmentId)
+      .eq('loan_id', loanId)
+      .single();
+    if (adjFetchErr || !adjustment) { res.status(404).json({ error: 'Adjustment not found' }); return; }
+
+    // Fetch loan
+    const { data: loan, error: loanFetchErr } = await supabase
+      .from('loans')
+      .select('*')
+      .eq('id', loanId)
+      .single();
+    if (loanFetchErr || !loan) { res.status(404).json({ error: 'Loan not found' }); return; }
+
+    // Reverse the adjustment effect
+    const updates: any = {};
+    let newBalance = Number(loan.remaining_balance);
+
+    if (adjustment.type === 'late_fee') {
+      newBalance = Math.max(0, Number(loan.remaining_balance) - Number(adjustment.amount));
+      updates.late_fees = Math.max(0, Number(loan.late_fees || 0) - Number(adjustment.amount));
+    } else if (adjustment.type === 'discount') {
+      newBalance = Number(loan.remaining_balance) + Number(adjustment.amount);
+      updates.discount_total = Math.max(0, Number(loan.discount_total || 0) - Number(adjustment.amount));
+      // Reopen loan if it was closed by this discount
+      if (loan.status === 'closed' && loan.is_fully_paid) {
+        updates.status = 'active';
+        updates.is_fully_paid = false;
+      }
+    }
+
+    updates.remaining_balance = newBalance;
+
+    const { error: updateErr } = await supabase.from('loans').update(updates).eq('id', loanId);
+    if (updateErr) throw updateErr;
+
+    const { error: delErr } = await supabase.from('loan_adjustments').delete().eq('id', adjustmentId);
+    if (delErr) throw delErr;
+
+    await supabase.from('activity_logs').insert({
+      user_id: req.user!.id,
+      user_name: req.user!.full_name,
+      user_role: req.user!.role,
+      action: 'UPDATE',
+      entity_type: 'loan',
+      entity_id: loan.id,
+      entity_code: loan.loan_code,
+      branch_id: req.user!.branch_id,
+      description: `Reversed ${adjustment.type.replace('_', ' ')} of \u20a8${adjustment.amount}: ${adjustment.reason}`
+    });
+
+    res.json({ message: 'Adjustment reversed successfully', data: { new_balance: newBalance } });
+  } catch (err) {
+    if (err instanceof z.ZodError) { res.status(400).json({ error: 'Validation error', details: err.errors }); return; }
+    console.error('[DELETE /adjustments] Error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to reverse adjustment' });
   }
 });
 
