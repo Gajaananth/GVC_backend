@@ -342,7 +342,7 @@ router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'),
     const { error: updateErr } = await supabase.from('loans').update(updates).eq('id', loanId);
     if (updateErr) throw updateErr;
 
-    const { data: adjustment, error: adjErr } = await supabase.from('loan_adjustments').insert({
+    const { error: adjErr } = await supabase.from('loan_adjustments').insert({
       loan_id: loanId,
       type: body.type,
       amount: body.amount,
@@ -350,9 +350,8 @@ router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'),
       balance_before: oldBalance,
       balance_after: newBalance,
       created_by: req.user!.id
-    }).select().single();
-    
-    if (adjErr) throw adjErr;
+    });
+    if (adjErr) console.error('[POST /adjustments] adjustment insert error:', adjErr);
 
     await supabase.from('activity_logs').insert({
       user_id: req.user!.id,
@@ -363,17 +362,16 @@ router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'),
       entity_id: loan.id,
       entity_code: loan.loan_code,
       branch_id: req.user!.branch_id,
-      description: `Applied ${body.type.replace('_', ' ')} of ₨${body.amount}: ${body.reason}`
+      description: `Applied ${body.type.replace('_', ' ')} of \u20a8${body.amount}: ${body.reason}`
     });
 
     res.json({
-      data: { 
-        adjustment, 
-        new_balance: newBalance, 
-        late_fees: updates.late_fees ?? loan.late_fees, 
-        discount_total: updates.discount_total ?? loan.discount_total, 
-        status: newStatus, 
-        is_fully_paid: isFullyPaid 
+      data: {
+        new_balance: newBalance,
+        late_fees: updates.late_fees ?? loan.late_fees,
+        discount_total: updates.discount_total ?? loan.discount_total,
+        status: newStatus,
+        is_fully_paid: isFullyPaid
       },
       message: `${body.type === 'late_fee' ? 'Late fee added' : 'Discount applied'} successfully`
     });
