@@ -265,11 +265,12 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     .eq('loan_id', req.params.id)
     .order('created_at', { ascending: false });
 
-  const { data: adjustments } = await supabase
+  const { data: adjustments, error: adjQueryErr } = await supabase
     .from('loan_adjustments')
-    .select('*, created_by_user:users!created_by(full_name)')
+    .select('id, type, amount, reason, balance_before, balance_after, created_at, created_by')
     .eq('loan_id', req.params.id)
     .order('created_at', { ascending: false });
+  if (adjQueryErr) console.error('[GET /:id] adjustments query error:', adjQueryErr);
 
   res.json({
     data: {
@@ -285,7 +286,8 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 const loanAdjustmentSchema = z.object({
   type: z.enum(['late_fee', 'discount']),
   amount: z.number().positive(),
-  reason: z.string().trim().min(3)
+  reason: z.string().trim().min(3),
+  date: z.string().optional()
 });
 
 router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'), async (req: AuthRequest, res: Response): Promise<void> => {
@@ -349,7 +351,8 @@ router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'),
       reason: body.reason,
       balance_before: oldBalance,
       balance_after: newBalance,
-      created_by: req.user!.id
+      created_by: req.user!.id,
+      ...(body.date ? { created_at: new Date(body.date).toISOString() } : {})
     });
     if (adjErr) console.error('[POST /adjustments] adjustment insert error:', adjErr);
 
