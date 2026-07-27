@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/supabase';
-import { authenticateJWT, requireAdmin, requireOwner, AuthRequest } from '../middleware/auth';
+import { authenticateJWT, requireAdmin, requireOwner, requireRole, AuthRequest } from '../middleware/auth';
 import { calculateLoanProduct } from '../utils/loanCalculator';
 import { TERM_CONFIG } from '../utils/loanTermConfig';
 import { format } from 'date-fns';
@@ -264,14 +264,126 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     .eq('loan_id', req.params.id)
     .order('created_at', { ascending: false });
 
+  const { data: adjustments } = await supabase
+    .from('loan_adjustments')
+    .select('*, created_by_user:users!created_by(full_name)')
+    .eq('loan_id', req.params.id)
+    .order('created_at', { ascending: false });
+
   res.json({
     data: {
       ...loan,
       schedule: schedule || [],
       payments: payments || [],
-      assignment_history: assignmentHistory || []
+      assignment_history: assignmentHistory || [],
+      adjustments: adjustments || []
     }
   });
+});
+
+const loanAdjustmentSchema = z.object({
+  type: z.enum(['late_fee', 'discount']),
+  amount: z.number().positive(),
+  reason: z.string().trim().min(3)
+});
+
+router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const loanId = req.params.id;
+    const body = loanAdjustmentSchema.parse(req.body);
+
+    const { data: loan, error: loanErr } = await supabase
+      .from('loans')
+      .select('*')
+      .eq('id', loanId)
+      .single();
+
+    if (loanErr || !loan) {
+      res.status(404).json({ error: 'Loan not found' });
+      return;
+    }
+
+    if (req.user?.role !== 'owner' && loan.branch_id !== req.user?.branch_id) {
+      res.status(403).json({ error: 'Access to loan denied for your branch' });
+      return;
+    }
+
+    if (loan.approval_status !== 'approved' || !['active', 'overdue'].includes(loan.status)) {
+      res.status(400).json({ error: 'Can only adjust approved loans that are active or overdue' });
+      return;
+    }
+
+    const oldBalance = Number(loan.remaining_balance);
+    let newBalance = oldBalance;
+    let updates: any = {};
+    let newStatus = loan.status;
+    let isFullyPaid = loan.is_fully_paid;
+
+    if (body.type === 'late_fee') {
+      newBalance = oldBalance + body.amount;
+      updates.late_fees = Number(loan.late_fees || 0) + body.amount;
+      if (loan.status === 'active') {
+        newStatus = 'overdue';
+      }
+    } else if (body.type === 'discount') {
+      newBalance = Math.max(0, oldBalance - body.amount);
+      updates.discount_total = Number(loan.discount_total || 0) + body.amount;
+      if (newBalance <= 0.01) {
+        isFullyPaid = true;
+        newStatus = 'closed';
+      }
+    }
+
+    updates.remaining_balance = newBalance;
+    updates.status = newStatus;
+    updates.is_fully_paid = isFullyPaid;
+
+    const { error: updateErr } = await supabase.from('loans').update(updates).eq('id', loanId);
+    if (updateErr) throw updateErr;
+
+    const { data: adjustment, error: adjErr } = await supabase.from('loan_adjustments').insert({
+      loan_id: loanId,
+      type: body.type,
+      amount: body.amount,
+      reason: body.reason,
+      balance_before: oldBalance,
+      balance_after: newBalance,
+      created_by: req.user!.id
+    }).select().single();
+    
+    if (adjErr) throw adjErr;
+
+    await supabase.from('activity_logs').insert({
+      user_id: req.user!.id,
+      user_name: req.user!.full_name,
+      user_role: req.user!.role,
+      action: 'UPDATE',
+      entity_type: 'loan',
+      entity_id: loan.id,
+      entity_code: loan.loan_code,
+      branch_id: req.user!.branch_id,
+      description: `Applied ${body.type.replace('_', ' ')} of ₨${body.amount}: ${body.reason}`
+    });
+
+    res.json({
+      data: { 
+        adjustment, 
+        new_balance: newBalance, 
+        late_fees: updates.late_fees ?? loan.late_fees, 
+        discount_total: updates.discount_total ?? loan.discount_total, 
+        status: newStatus, 
+        is_fully_paid: isFullyPaid 
+      },
+      message: `${body.type === 'late_fee' ? 'Late fee added' : 'Discount applied'} successfully`
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: err.errors });
+      return;
+    }
+    const message = err instanceof Error ? err.message : 'Failed to apply adjustment';
+    res.status(500).json({ error: message });
+  }
 });
 
 // POST /api/loans
