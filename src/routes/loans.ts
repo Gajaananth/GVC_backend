@@ -279,7 +279,8 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
       payments: payments || [],
       assignment_history: assignmentHistory || [],
       adjustments: adjustments || []
-    }
+    },
+    warning: adjQueryErr ? adjQueryErr.message : undefined
   });
 });
 
@@ -376,7 +377,8 @@ router.post('/:id/adjustments', requireRole('owner', 'admin', 'branch_manager'),
         status: newStatus,
         is_fully_paid: isFullyPaid
       },
-      message: `${body.type === 'late_fee' ? 'Late fee added' : 'Discount applied'} successfully`
+      message: `${body.type === 'late_fee' ? 'Late fee added' : 'Discount applied'} successfully`,
+      warning: adjErr ? `Database Error: ${adjErr.message}` : undefined
     });
   } catch (err) {
     if (err instanceof z.ZodError) {
